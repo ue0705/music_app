@@ -54,6 +54,20 @@ class PitchDetectorTest {
     @Test
     fun detectsC2_65_4Hz() = assertDetectsWithinCents(65.41)
 
+    // Regression: notes above ~830 Hz have their first NSDF lobe straddling
+    // minLag; the detector used to skip it as if it were the lag-0 lobe and
+    // report the note an octave low (A5 880 Hz -> 440 Hz).
+    @Test
+    fun detectsA5_880Hz() = assertDetectsWithinCents(880.0)
+
+    @Test
+    fun detectsC6_1046_5Hz() = assertDetectsWithinCents(1046.5)
+
+    @Test
+    fun detectsEverySemitoneFromC2ToC6() {
+        for (midi in 36..84) assertDetectsWithinCents(midiToHz(midi))
+    }
+
     @Test
     fun silenceReturnsNull() {
         val silence = FloatArray((sampleRate * 0.1).toInt())

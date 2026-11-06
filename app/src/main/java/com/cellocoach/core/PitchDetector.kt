@@ -77,12 +77,15 @@ class PitchDetector(
         val maxLag = (sampleRate / fmin).toInt().coerceAtMost(n - 1)
         if (maxLag <= minLag) return null
 
-        // 2. NSDF over the candidate lag range.
+        // 2. NSDF from lag 0 up to maxLag.
         //    n'(tau) = 2 * r(tau) / m(tau)
         //    r(tau)  = sum_{i} x[i] * x[i+tau]
         //    m(tau)  = sum_{i} (x[i]^2 + x[i+tau]^2)
+        //    Lags below minLag are never chosen as the pitch, but they must be
+        //    computed so the end of the trivial lag-0 lobe can be located (see
+        //    collectKeyMaxima) — starting the scan at minLag misreads high notes.
         val nsdf = DoubleArray(maxLag + 1)
-        for (tau in minLag..maxLag) {
+        for (tau in 0..maxLag) {
             var acf = 0.0   // r(tau)
             var div = 0.0   // m(tau)
             val limit = n - tau
@@ -121,16 +124,22 @@ class PitchDetector(
     private data class KeyMaximum(val lag: Int, val value: Double)
 
     /**
-     * Collect the **key maxima** of the NSDF within `[minLag, maxLag]`: after each
-     * upward zero crossing we take the single highest sample until the next
-     * downward zero crossing. This is the McLeod peak set used to avoid the
-     * trivial lag-0 peak and reduce octave errors.
+     * Collect the **key maxima** of the NSDF: after each upward zero crossing we
+     * take the single highest sample until the next downward zero crossing. This
+     * is the McLeod peak set used to avoid the trivial lag-0 peak and reduce
+     * octave errors.
+     *
+     * The scan starts at lag 0 so that only the genuine lag-0 lobe is skipped.
+     * (Starting at [minLag] and skipping "whatever is positive there" used to
+     * swallow the real pitch peak of notes above ~830 Hz, whose first lobe
+     * already covers minLag, and report them an octave low.) Only lags in
+     * `[minLag, maxLag]` are eligible as a maximum.
      */
     private fun collectKeyMaxima(nsdf: DoubleArray, minLag: Int, maxLag: Int): List<KeyMaximum> {
         val maxima = ArrayList<KeyMaximum>()
-        var tau = minLag
+        var tau = 0
 
-        // Advance past any initial positive region so we start at a zero crossing.
+        // Skip the lag-0 lobe (nsdf[0] == 1) up to its first zero crossing.
         while (tau <= maxLag && nsdf[tau] > 0.0) tau++
 
         while (tau <= maxLag) {
@@ -138,17 +147,17 @@ class PitchDetector(
             while (tau <= maxLag && nsdf[tau] <= 0.0) tau++
             if (tau > maxLag) break
 
-            // Track the highest sample until we dip back to/below zero.
-            var bestLag = tau
-            var bestVal = nsdf[tau]
+            // Track the highest eligible sample until we dip back to/below zero.
+            var bestLag = -1
+            var bestVal = 0.0
             while (tau <= maxLag && nsdf[tau] > 0.0) {
-                if (nsdf[tau] > bestVal) {
+                if (tau >= minLag && (bestLag < 0 || nsdf[tau] > bestVal)) {
                     bestVal = nsdf[tau]
                     bestLag = tau
                 }
                 tau++
             }
-            maxima.add(KeyMaximum(bestLag, bestVal))
+            if (bestLag >= 0) maxima.add(KeyMaximum(bestLag, bestVal))
         }
         return maxima
     }
