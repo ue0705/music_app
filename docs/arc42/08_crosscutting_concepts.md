@@ -120,11 +120,13 @@ graph TD
 
 ## 8.6 錯誤與權限處理
 
-- **麥克風權限**：`AudioPitchSource` 假設已有 `RECORD_AUDIO`；取得權限是 UI 層責任。進入收音畫面前請求；被拒時不啟動 `PitchSource`，畫面顯示說明與重試入口（不可崩潰）。
+- **麥克風權限**：`AudioPitchSource` 假設已有 `RECORD_AUDIO`；取得權限是 UI 層責任。`MainActivity` 首次啟動時請求，並在 onCreate / onResume / 授權結果時把實際狀態回報給 `PracticeViewModel.onMicPermissionChanged`；被拒時不啟動 `PitchSource`，各畫面頂端顯示橫幅與「授權麥克風」重試（系統不再跳窗時改開 App 設定頁），不可崩潰。
+- **麥克風生命週期**：`PitchSource` 只在「校正 / 練習」畫面、App 在前景且有權限時執行；首頁、報告頁與背景一律停止收音（`PracticeViewModel.syncMic`）。練習中切到背景會放棄這一輪，回到前景後從頭重新倒數。
 - **音訊不可用**：偵測連續回 null 時，follower 靠 hard timeout 仍能推進、Scorer 該音 `sustain≈0`，系統優雅降級而非卡死。
 - **樂譜解析失敗**：`ScoreLoader.load` 對壞檔/不支援格式拋例外，UI 攔截並提示，不進 Practice（對齊 Python `/load_score` 的 400/500 分流）。
 - **跟譜單向性**：學生回頭重拉前段不會倒回（MVP 限制，避免 beam search）；報告以實際走過的 timeline 計分。
 - **校正容錯**：偵測偏離目標弦 >50¢ 或靜音時清空 buffer 重來，避免把錯弦/雜訊記成偏移。
+- **已存校正不被覆蓋**：重新校正是寫進一份新的 `Tuning`，四弦全部完成才取代已存的校正；中途離開或按「略過（A=440）」只影響當次練習，回首頁即恢復已存校正，讓「已校正」標示與「開始練習」的行為一致。
 
 ## 8.7 並行模型
 

@@ -13,6 +13,7 @@ import com.cellocoach.core.PitchFrame
 import com.cellocoach.core.ScoreFollower
 import com.cellocoach.core.midiToHz
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -197,6 +198,7 @@ class PracticeFlowTest {
         // The ViewModel snapshots the summary and switches to the Report screen.
         composeTestRule.waitForIdle()
         assertEquals(Screen.REPORT, vm.screen)
+        assertFalse("the mic stops once the run is over", fake.isRunning)
         val summary = vm.summary
         assertNotNull("summary must be produced", summary)
         requireNotNull(summary)

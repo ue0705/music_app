@@ -18,6 +18,8 @@ object TestTags {
     // ---- Navigation / shell ------------------------------------------------
     const val NAV_HOME = "nav_home"
     const val SCREEN_ROOT = "screen_root"
+    const val MIC_PERMISSION_BANNER = "mic_permission_banner"
+    const val MIC_PERMISSION_REQUEST = "mic_permission_request"
 
     // ---- Home --------------------------------------------------------------
     const val HOME_START = "home_start"

@@ -42,17 +42,27 @@ class AudioPitchSource(
     private val windowSize = 2048
 
     @Volatile private var running = false
+
+    /**
+     * Bumped on every [start] / [stop]. A capture loop only keeps going (and only
+     * emits) while its own generation is current, so a quick stop→start can never
+     * leave an old loop reading the mic alongside the new one.
+     */
+    @Volatile private var generation = 0
     private var recordThread: Thread? = null
-    private var recorder: AudioRecord? = null
+    @Volatile private var recorder: AudioRecord? = null
 
     /**
      * Begin capture. Spawns the recording loop on a background thread; returns
-     * immediately. Safe to call once; a second call while running is ignored.
+     * immediately. A second call while running is ignored; it may be called again
+     * after [stop] (the ViewModel starts/stops capture as screens change).
      */
     @SuppressLint("MissingPermission") // RECORD_AUDIO granted by the UI before construction.
     override fun start(onFrame: (PitchFrame) -> Unit) {
         if (running) return
         running = true
+        val gen = ++generation
+        fun current() = running && gen == generation
 
         recordThread = thread(name = "AudioPitchSource", isDaemon = true) {
             val minBuf = AudioRecord.getMinBufferSize(
@@ -73,7 +83,8 @@ class AudioPitchSource(
 
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()
-                running = false
+                if (recorder === record) recorder = null
+                if (gen == generation) running = false
                 return@thread
             }
 
@@ -81,7 +92,7 @@ class AudioPitchSource(
             val floatBuf = FloatArray(windowSize)
             try {
                 record.startRecording()
-                while (running) {
+                while (current()) {
                     val read = record.read(shortBuf, 0, windowSize)
                     if (read <= 0) continue
 
@@ -96,14 +107,14 @@ class AudioPitchSource(
 
                     val window = if (read == windowSize) floatBuf else floatBuf.copyOf(read)
                     val hz = detector.detect(window)
-                    onFrame(PitchFrame(hz = hz, rms = rms))
+                    if (current()) onFrame(PitchFrame(hz = hz, rms = rms))
                 }
             } catch (_: IllegalStateException) {
                 // Recorder torn down mid-read; loop exits via running flag.
             } finally {
                 runCatching { record.stop() }
                 runCatching { record.release() }
-                recorder = null
+                if (recorder === record) recorder = null
             }
         }
     }
@@ -111,11 +122,19 @@ class AudioPitchSource(
     /** Stop capture and release the recorder. Idempotent. */
     override fun stop() {
         running = false
-        recordThread?.let { runCatching { it.join(500) } }
+        generation++
+        val t = recordThread
         recordThread = null
-        recorder?.let {
-            runCatching { it.stop() }
-            runCatching { it.release() }
+        if (t != null) {
+            runCatching { t.join(500) }
+            // Still blocked in read() after the grace period: release its recorder
+            // to unblock it (the loop then exits on its stale generation).
+            if (t.isAlive) {
+                recorder?.let {
+                    runCatching { it.stop() }
+                    runCatching { it.release() }
+                }
+            }
         }
         recorder = null
     }

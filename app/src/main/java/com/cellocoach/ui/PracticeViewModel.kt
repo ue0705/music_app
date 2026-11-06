@@ -138,6 +138,14 @@ class PracticeViewModel(
     @Volatile private var latestFrame: PitchFrame = PitchFrame(null, 0f)
 
     // ---- Tuning / calibration state ---------------------------------------
+    /**
+     * The persisted 4-string calibration (null if none). [tuning] is what the
+     * current run uses; it diverges from this only during a (re)calibration or a
+     * skipped one, and is restored from it on [goHome] — so the Home badge and the
+     * next "開始練習" always agree with what is saved.
+     */
+    private var savedTuning: Tuning? = null
+
     /** True once a saved 4-string tuning exists. */
     var hasSavedTuning by mutableStateOf(false)
         private set
@@ -188,8 +196,23 @@ class PracticeViewModel(
     private var tickJob: Job? = null
     private var countdownJob: Job? = null
     private var beatJob: Job? = null
-    private var sourceStarted = false
     private val metronome = Metronome()
+
+    // ---- Microphone --------------------------------------------------------
+    /**
+     * True when `RECORD_AUDIO` is known to be denied: the UI shows a banner with a
+     * retry button and no capture is attempted. [com.cellocoach.MainActivity]
+     * reports the real grant state via [onMicPermissionChanged]; the default
+     * (false) keeps tests that inject a fake source unaffected.
+     */
+    var micPermissionDenied by mutableStateOf(false)
+        private set
+
+    /** Whether the app is visible; capture stops while it is in the background. */
+    private var inForeground = true
+
+    /** Whether [pitchSource] is running. Read on the audio thread to drop late frames. */
+    @Volatile private var sourceStarted = false
 
     /** Note timeline handed to the engine, stretched for slow practice so the
      *  follower's time-based fallbacks scale with the chosen tempo. Display
@@ -218,7 +241,6 @@ class PracticeViewModel(
 
     /** Home → either Tuning (if not yet calibrated) or straight to Practice. */
     fun onStartPressed() {
-        ensureSourceRunning()
         if (tuning.isCalibrated()) {
             goToPractice()
         } else {
@@ -226,23 +248,27 @@ class PracticeViewModel(
         }
     }
 
-    /** Force (re)calibration from Home, even if a saved tuning exists. */
+    /**
+     * Force (re)calibration from Home, even if a saved tuning exists. Calibrates
+     * into a fresh [Tuning]; the saved one is only replaced once all four strings
+     * are done, so skipping or leaving midway keeps it.
+     */
     fun beginCalibration() {
-        ensureSourceRunning()
-        tuning.clear()
-        tuning = Tuning(tuning.offsets) // trigger recomposition with cleared map
+        tuning = Tuning()
         calibTarget = "C"
         calibProgress = 0f
         calibCents = null
         calibBuffer.clear()
-        screen = Screen.TUNING
+        show(Screen.TUNING)
         startTicking()
     }
 
-    /** Skip calibration — cents computed against A=440 (port of `/tune/skip`). */
+    /**
+     * Skip calibration — this run's cents are computed against A=440 (port of
+     * `/tune/skip`). A saved calibration is not discarded; [goHome] restores it.
+     */
     fun skipCalibration() {
-        tuning.clear()
-        tuning = Tuning(tuning.offsets)
+        tuning = Tuning()
         calibTarget = null
         calibBuffer.clear()
         goToPractice()
@@ -250,9 +276,8 @@ class PracticeViewModel(
 
     /** Enter the practice screen and start the metronome countdown. */
     fun goToPractice() {
-        ensureSourceRunning()
         resetEngine()
-        screen = Screen.PRACTICE
+        show(Screen.PRACTICE)
         startTicking()
         startCountdown()
     }
@@ -267,7 +292,11 @@ class PracticeViewModel(
     fun goHome() {
         countdownJob?.cancel()
         beatJob?.cancel()
-        screen = Screen.HOME
+        // Whatever this run used (a skip's A=440, a half-finished recalibration),
+        // Home and the next Start go back to the saved calibration, matching the
+        // "已校正" badge.
+        tuning = savedTuning?.copyOf() ?: Tuning()
+        show(Screen.HOME)
     }
 
     /** Set the practice tempo multiplier (e.g. 1.0, 0.75, 0.5). */
@@ -293,10 +322,68 @@ class PracticeViewModel(
     // Source wiring
     // =======================================================================
 
-    private fun ensureSourceRunning() {
-        if (sourceStarted) return
-        sourceStarted = true
-        pitchSource.start { frame -> latestFrame = frame }
+    /**
+     * Report the current `RECORD_AUDIO` grant state (from MainActivity on create,
+     * on resume and after the permission dialog). A grant starts capture if a
+     * listening screen is open; a denial shows the banner and stops capture.
+     */
+    fun onMicPermissionChanged(granted: Boolean) {
+        micPermissionDenied = !granted
+        syncMic()
+    }
+
+    /**
+     * The app moved to / from the foreground (MainActivity onStart / onStop).
+     * Capture stops in the background. A practice run can't continue blind, so it
+     * is reset and restarts from the top (with the count-in) on return; a
+     * calibration simply resumes with an empty buffer.
+     */
+    fun onForegroundChanged(foreground: Boolean) {
+        if (foreground == inForeground) return
+        inForeground = foreground
+        if (!foreground) {
+            when (screen) {
+                Screen.PRACTICE -> {
+                    countdownJob?.cancel()
+                    beatJob?.cancel()
+                    resetEngine()
+                }
+                Screen.TUNING -> {
+                    calibBuffer.clear()
+                    calibProgress = 0f
+                    calibCents = null
+                }
+                else -> { /* nothing running */ }
+            }
+            syncMic()
+        } else {
+            syncMic()
+            if (screen == Screen.PRACTICE) startCountdown()
+        }
+    }
+
+    /** Switch screens; also starts/stops the microphone as needed. */
+    private fun show(s: Screen) {
+        screen = s
+        syncMic()
+    }
+
+    /**
+     * Run the microphone only while it is needed: on the Tuning or Practice
+     * screen, with the app in the foreground and the permission granted. Home and
+     * Report never capture audio.
+     */
+    private fun syncMic() {
+        val wanted = !micPermissionDenied && inForeground &&
+            (screen == Screen.TUNING || screen == Screen.PRACTICE)
+        if (wanted && !sourceStarted) {
+            sourceStarted = true
+            pitchSource.start { frame -> if (sourceStarted) latestFrame = frame }
+        } else if (!wanted && sourceStarted) {
+            sourceStarted = false
+            pitchSource.stop()
+            latestFrame = PitchFrame(null, 0f) // never judge a stale reading
+        }
     }
 
     private fun startTicking() {
@@ -406,7 +493,7 @@ class PracticeViewModel(
         // On the first done tick, snapshot the summary and jump to the report.
         if (f.isDone() && summary == null) {
             summary = scorer?.summary()
-            screen = Screen.REPORT
+            show(Screen.REPORT)
         }
     }
 
@@ -446,6 +533,7 @@ class PracticeViewModel(
             // All four strings done: persist and move on to practice.
             calibTarget = null
             runCatching { tuningStore.save(tuning) }
+            savedTuning = tuning.copyOf()
             hasSavedTuning = tuning.isCalibrated()
             savedTuningAt = tuningStore.savedAt()
             rebuildScorer()
@@ -462,7 +550,8 @@ class PracticeViewModel(
     private fun loadSavedTuning() {
         val saved = tuningStore.load()
         if (saved != null && saved.isCalibrated()) {
-            tuning = saved
+            savedTuning = saved
+            tuning = saved.copyOf()
             calibTarget = null
             hasSavedTuning = true
             savedTuningAt = tuningStore.savedAt()
@@ -626,6 +715,9 @@ class PracticeViewModel(
 }
 
 private fun log2(x: Double): Double = ln(x) / ln(2.0)
+
+/** Independent copy, so calibrating the working tuning never mutates the saved one. */
+private fun Tuning.copyOf(): Tuning = Tuning(offsets.toMutableMap())
 
 /** Round to [decimals] places (Python `round()` parity). */
 private fun Double.roundTo(decimals: Int): Double {
