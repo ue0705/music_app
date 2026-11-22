@@ -151,7 +151,7 @@ class Scorer(val notes: List<ScoreNote>, val tuning: Tuning = Tuning()) {
         r.samples += 1
         if (detectedHz == null || detectedHz <= 0f) return
         val hz = detectedHz.toDouble()
-        val playedMidi = (69.0 + 12.0 * log2(hz / 440.0)).roundToInt()
+        val playedMidi = (69.0 + 12.0 * log2(hz / A4_HZ)).roundToInt()
         r.voicedSamples += 1
         r.voicedMidiCounts[playedMidi] = (r.voicedMidiCounts[playedMidi] ?: 0) + 1
         if (playedMidi == n.midi) {
@@ -273,7 +273,7 @@ enum class PitchStatus { GOOD, CLOSE, OFF, WRONG }
 fun pitchStatus(detectedHz: Double, expected: ScoreNote, tuning: Tuning): PitchStatus {
     val rawCents = 1200.0 * log2(detectedHz / expected.freq)
     val cents = rawCents - tuning.offsetCentsForMidi(expected.midi)
-    val playedMidi = (69.0 + 12.0 * log2(detectedHz / 440.0)).roundToInt()
+    val playedMidi = (69.0 + 12.0 * log2(detectedHz / A4_HZ)).roundToInt()
     return when {
         playedMidi != expected.midi -> PitchStatus.WRONG
         abs(cents) < 20.0 -> PitchStatus.GOOD

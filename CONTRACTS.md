@@ -19,9 +19,11 @@ HTTPS / secure-context / LAN 連線的痛點。
 ```kotlin
 data class ScoreNote(val start: Double, val end: Double, val midi: Int, val name: String) {
     val isRest: Boolean              // midi < 0
-    val freq: Double                 // A=440；rest 為 0
+    val freq: Double                 // A=A4_HZ（442）；rest 為 0
     companion object { const val REST = -1 }
 }
+const val A4_HZ: Double = 442.0          // 標準音高，全 App 唯一來源（Python 原版為 440，見 ADR-006）
+const val LEGACY_A4_HZ: Double = 440.0   // v1.0.8 前的基準；舊校正檔據此換算
 fun midiToHz(midi: Int): Double
 fun midiToHz(midi: Double): Double
 fun hzToMidi(hz: Double): Int       // 最近整數 MIDI
@@ -168,8 +170,8 @@ class FakePitchSource(private val frames: List<PitchFrame> = emptyList()) : Pitc
 等價於 `~/.cello-practice/tuning.json` 的持久化。用 app `filesDir/tuning.json`（JSON 純文字）。
 ```kotlin
 class TuningStore(private val dir: java.io.File) {
-    fun load(): Tuning?            // 不存在/壞檔回 null（需四弦齊全）
-    fun save(tuning: Tuning)       // 僅在 isCalibrated 時寫入；含 savedAt ISO 時間
+    fun load(): Tuning?            // 不存在/壞檔回 null（需四弦齊全）；無 a4_hz 的舊檔視為 A=440，偏移換算到 A4_HZ
+    fun save(tuning: Tuning)       // 僅在 isCalibrated 時寫入；含 a4_hz 與 savedAt ISO 時間
     fun savedAt(): String?
 }
 ```

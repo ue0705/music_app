@@ -148,7 +148,7 @@ graph TD
 
 | 類別 | 簽章 | 儲存位置 | 說明 |
 |---|---|---|---|
-| `TuningStore(dir: File)` | `load(): Tuning?`、`save(tuning)`、`savedAt(): String?` | `filesDir/tuning.json` | 不存在／壞檔／四弦不齊時 `load()` 回 `null`；只在 `isCalibrated` 時寫入，含 `saved_at`。手寫的小型 JSON 讀寫器，不加相依 |
+| `TuningStore(dir: File)` | `load(): Tuning?`、`save(tuning)`、`savedAt(): String?` | `filesDir/tuning.json` | 不存在／壞檔／四弦不齊時 `load()` 回 `null`；只在 `isCalibrated` 時寫入，含 `a4_hz` 與 `saved_at`；無 `a4_hz` 的舊檔從 A=440 換算。手寫的小型 JSON 讀寫器，不加相依 |
 | `ScoreLibrary(dir: File)` | `list()`、`exists(name)`、`read(name)`、`save(rawName, bytes): String`、`delete(name)`、`sanitize(rawName)` | `filesDir/scores/` | 匯入的樂譜。`sanitize` 只留檔名最後一段、去掉 query/fragment、非 `[\w.-]` 換成 `_`、補 `.musicxml` 副檔名，避免路徑穿越 |
 
 同名時，匯入的曲目優先於內建 assets（`PracticeViewModel.loadScore`）。

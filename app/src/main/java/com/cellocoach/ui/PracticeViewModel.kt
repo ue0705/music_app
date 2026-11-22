@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.cellocoach.audio.AudioPitchSource
+import com.cellocoach.core.A4_HZ
 import com.cellocoach.core.Clock
 import com.cellocoach.core.PitchFrame
 import com.cellocoach.core.PitchSource
@@ -264,7 +265,7 @@ class PracticeViewModel(
     }
 
     /**
-     * Skip calibration — this run's cents are computed against A=440 (port of
+     * Skip calibration — this run's cents are computed against A=442 (port of
      * `/tune/skip`). A saved calibration is not discarded; [goHome] restores it.
      */
     fun skipCalibration() {
@@ -292,7 +293,7 @@ class PracticeViewModel(
     fun goHome() {
         countdownJob?.cancel()
         beatJob?.cancel()
-        // Whatever this run used (a skip's A=440, a half-finished recalibration),
+        // Whatever this run used (a skip's A=442, a half-finished recalibration),
         // Home and the next Start go back to the saved calibration, matching the
         // "已校正" badge.
         tuning = savedTuning?.copyOf() ?: Tuning()
@@ -457,7 +458,7 @@ class PracticeViewModel(
         }
         val frame = latestFrame
         val hz = frame.hz?.takeIf { it > 0f }
-        val detMidi = hz?.let { (69.0 + 12.0 * log2(it / 440.0)).roundToInt() }
+        val detMidi = hz?.let { (69.0 + 12.0 * log2(it / A4_HZ)).roundToInt() }
         f.observe(detMidi)
         s.observe(f.currentNoteIdx(), hz)
         refreshPracticeState()
@@ -481,11 +482,11 @@ class PracticeViewModel(
         if (exp != null && exp.midi >= 0 && hz != null) {
             val rawCents = 1200.0 * log2(hz / exp.freq)
             val c = rawCents - tuning.offsetCentsForMidi(exp.midi)
-            detectedMidi = (69.0 + 12.0 * log2(hz / 440.0)).roundToInt()
+            detectedMidi = (69.0 + 12.0 * log2(hz / A4_HZ)).roundToInt()
             cents = c.roundTo(1)
             status = pitchStatus(hz, exp, tuning)
         } else {
-            detectedMidi = hz?.let { (69.0 + 12.0 * log2(it / 440.0)).roundToInt() }
+            detectedMidi = hz?.let { (69.0 + 12.0 * log2(it / A4_HZ)).roundToInt() }
             cents = null
             status = null
         }

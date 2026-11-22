@@ -57,7 +57,7 @@ graph TD
 |---|---|---|
 | **指法→弦對應簡化** | 高把位的音一律算成「最高開弦」來套校正偏移（差通常 < 5¢）。見 `Tuning.stringForMidi` / [open string](12_glossary.md#open-string-空弦) | 若要支援大跨度把位/拇指把位，需更細的把位推論 |
 | **受限的原生樂譜渲染** | [ADR-001](09_architecture_decisions.md#adr-001-原生-compose-canvas-樂譜渲染-而非-webview--osmd) 自繪五線譜，僅支援單聲部子集，複雜記譜（連音線、反覆、裝飾音）支援不足 | 視需求擴充 `ScoreView`，或在「需要完整排版」時再評估引擎 |
-| **校正儲存無 schema 版本** | `filesDir/tuning.json` 是純文字 JSON，無 schema 版本管理；改格式可能要手動清舊檔（含 `savedAt` ISO 時間） | 加入版本欄位與遷移邏輯 |
+| **校正儲存無 schema 版本** | `filesDir/tuning.json` 是純文字 JSON，無 schema 版本管理；改格式可能要手動清舊檔（含 `savedAt` ISO 時間）。v1.0.8 已加 `a4_hz` 欄位並遷移 A=440 舊檔（[ADR-006](09_architecture_decisions.md#adr-006-標準音高改為-a442)），其他欄位變動仍無機制 | 加入通用版本欄位與遷移邏輯 |
 | **MusicXML 解析自製** | 不用 music21，改以 JDK `javax.xml` 自解析（見 [CONTRACTS.md](../../CONTRACTS.md)），覆蓋的 MusicXML 特性有限 | 依實際曲目逐步補齊解析分支 |
 | **Robolectric 渲染為近似** | Compose 在 Robolectric 下為 shadow 近似，像素級正確性需人工/instrumented 確認 | 關鍵畫面以選用 instrumented 測試或實機截圖補強 |
 | **煙霧測試沒有先捲動** | `AppSmokeTest` 直接斷言「開始練習」已顯示；手機橫放、螢幕小或曲目多時按鈕在畫面外，測試失敗（2026-11 實機發生） | 斷言前先 `performScrollTo()` |

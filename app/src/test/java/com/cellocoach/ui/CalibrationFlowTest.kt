@@ -145,17 +145,19 @@ class CalibrationFlowTest {
     }
 
     @Test
-    fun `skip works and goes straight to practice with A=440 reference`() {
+    fun `skip works and goes straight to practice with A=442 reference`() {
         val vm = launchApp()
         composeTestRule.onNodeWithTag(TestTags.HOME_START).performScrollTo().performClick()
         composeTestRule.waitForIdle()
         assertEquals(Screen.TUNING, vm.screen)
 
-        // Tap "略過（使用 A=440）".
+        // The skip button names the reference pitch; tap "略過（使用 A=442）".
+        composeTestRule.onNodeWithTag(TestTags.TUNING_SKIP)
+            .assertTextContains("A=442", substring = true)
         composeTestRule.onNodeWithTag(TestTags.TUNING_SKIP).performClick()
         composeTestRule.waitForIdle()
 
-        // Skipping leaves the tuning uncalibrated (cents fall back to A=440) and
+        // Skipping leaves the tuning uncalibrated (cents fall back to A=442) and
         // jumps to Practice without persisting anything.
         assertEquals(Screen.PRACTICE, vm.screen)
         assertNull(vm.calibTarget)

@@ -25,7 +25,7 @@ import com.cellocoach.ui.TestTags
  * Drives the open-string calibration in order C → G → D → A, mirroring
  * `_calibration_tick_loop`. Shows the current target string, the live cents
  * deviation, and a progress bar that fills over [PracticeViewModel.CALIB_REQUIRED_TICKS]
- * stable readings. "略過" skips to practice using A=440 as the reference.
+ * stable readings. "略過" skips to practice using A=442 ([A4_HZ]) as the reference.
  */
 @Composable
 fun TuningScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
@@ -72,7 +72,7 @@ fun TuningScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
             onClick = { vm.skipCalibration() },
             modifier = Modifier.testTag(TestTags.TUNING_SKIP),
         ) {
-            Text("略過（使用 A=440）")
+            Text("略過（使用 A=442）")
         }
     }
 }

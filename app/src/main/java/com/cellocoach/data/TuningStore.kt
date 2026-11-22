@@ -1,8 +1,11 @@
 package com.cellocoach.data
 
+import com.cellocoach.core.A4_HZ
+import com.cellocoach.core.LEGACY_A4_HZ
 import com.cellocoach.core.STRING_NAMES
 import com.cellocoach.core.Tuning
 import java.io.File
+import kotlin.math.ln
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
@@ -12,14 +15,21 @@ import java.time.temporal.ChronoUnit
  * Port of the persistence half of `tuning.py` (`Tuning.save` / `Tuning.load` /
  * `Tuning.saved_at`). The Python version wrote to `~/.cello-practice/tuning.json`;
  * on Android we instead write `tuning.json` inside the supplied directory (the
- * caller passes the app `filesDir`). The on-disk JSON shape is identical:
+ * caller passes the app `filesDir`). The on-disk JSON shape matches Python's,
+ * plus an `a4_hz` field recording the reference pitch the offsets are measured
+ * against:
  *
  * ```json
  * {
  *   "offsets": { "C": -3.2, "G": 1.5, "D": 0.0, "A": 4.1 },
+ *   "a4_hz": 442.0,
  *   "saved_at": "2026-06-19T10:30:00"
  * }
  * ```
+ *
+ * Files without `a4_hz` (written before v1.0.8, or by the Python version) were
+ * measured against A=[LEGACY_A4_HZ]; [load] re-bases their offsets onto the
+ * current [A4_HZ] so an existing calibration stays correct after the change.
  *
  * `org.json` / Gson / Moshi are intentionally NOT used (no extra gradle deps);
  * the JSON is small and fixed-shape, so we hand-write a tiny writer/reader.
@@ -41,7 +51,9 @@ class TuningStore(private val dir: File) {
             val obj = parseObject(f.readText())
             val offsets = parseOffsets(obj["offsets"]) ?: return null
             if (!STRING_NAMES.all { it in offsets }) return null
-            Tuning(offsets.toMutableMap())
+            val storedRef = obj["a4_hz"]?.toDouble() ?: LEGACY_A4_HZ
+            require(storedRef > 0) { "invalid a4_hz" }
+            Tuning(rebase(offsets, storedRef).toMutableMap())
         } catch (e: Exception) {
             // OSError / ValueError equivalent: any parse or IO failure -> null.
             null
@@ -76,6 +88,17 @@ class TuningStore(private val dir: File) {
         }
     }
 
+    /**
+     * Re-express offsets measured against A=[storedRef] as offsets against the
+     * current [A4_HZ]. The open string's real Hz is unchanged; only the nominal
+     * it is compared to moves, by `1200·log2(storedRef / A4_HZ)` cents.
+     */
+    private fun rebase(offsets: Map<String, Double>, storedRef: Double): Map<String, Double> {
+        if (storedRef == A4_HZ) return offsets
+        val shift = 1200.0 * (ln(storedRef / A4_HZ) / ln(2.0))
+        return offsets.mapValues { (_, v) -> v + shift }
+    }
+
     // ---- tiny JSON writer -------------------------------------------------
 
     private fun buildJson(offsets: Map<String, Double>, savedAt: String): String {
@@ -87,6 +110,7 @@ class TuningStore(private val dir: File) {
             append("  \"offsets\": {\n")
             append(offsetEntries)
             append("\n  },\n")
+            append("  \"a4_hz\": $A4_HZ,\n")
             append("  \"saved_at\": ${quote(savedAt)}\n")
             append("}\n")
         }

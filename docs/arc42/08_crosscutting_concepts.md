@@ -56,7 +56,7 @@ graph LR
 
 > **修正紀錄（2026-11）**：舊版從 `minLag` 開始掃描並跳過「那裡的正值區段」。830 Hz 以上的音，真正的音高峰所在區段剛好跨過 `minLag`，於是被當成 lag-0 主瓣跳掉，報成低八度（880 → 440 Hz）。改為從 lag 0 計算後，C2–C6 每個半音的純音與泛音豐富的合成音都在 10¢ 內；實機以喇叭播放 880 / 987.77 / 1046.5 Hz，讀值為 880.0 / 987.77 / 1046.52 Hz。回歸測試見 `PitchDetectorTest`。
 
-下游一律用 `midi = round(69 + 12·log2(hz/440))`。`AudioPitchSource` 每 2048 樣本（約 46 ms）送一框；ViewModel 以 50 ms tick 取用最新一框。
+下游一律用 `midi = round(69 + 12·log2(hz/A4_HZ))`，`A4_HZ = 442`（見 [8.5](#85-調音偏移模型)）。`AudioPitchSource` 每 2048 樣本（約 46 ms）送一框；ViewModel 以 50 ms tick 取用最新一框。
 
 ## 8.3 計分數學 (sustain + intonation)
 
@@ -134,15 +134,16 @@ graph TD
 
 ## 8.5 調音偏移模型
 
-真實大提琴鮮少恰好 A=440，各弦張力老化也不同步。`Tuning`（移植 `tuning.py`）讓計分以「你的琴的實際音高」為基準：
+真實大提琴鮮少恰好落在標準音高，各弦張力老化也不同步。`Tuning`（移植 `tuning.py`）讓計分以「你的琴的實際音高」為基準：
 
-- 開弦 nominal：C36、G43、D50、A57（`STRINGS`）。
+- **標準音高**：`A4_HZ = 442.0`（`ScoreNote.kt`），所有 `midiToHz` / `hzToMidi` / `log2(hz/A4_HZ)` 都以它為準。Python 原版是 440，v1.0.8 改為樂團常用的 442（[ADR-006](09_architecture_decisions.md#adr-006-標準音高改為-a442)）。
+- 開弦 nominal：C36、G43、D50、A57（`STRINGS`），A3 = 221 Hz。
 - `calibrateString(name, hz)`：`offset = 1200·log2(hz / nominalHz(name))`，存為該弦 cents 偏移。
 - **note → 弦啟發式**（`stringForMidi`）：取 nominal ≤ 該音的**最高**開弦（低於 C2 仍歸 C）。偏向「較高弦的低把位」，符合一到四把位常態；拇指把位會誤判，MVP 可接受。
 - `offsetCentsForMidi(midi)`：回該音所在弦的偏移（未校正回 0）；Scorer 與 `pitchStatus` 算 cents 時扣除它。
 - `asMap()` 四捨五入到 0.1；`nextUncalibrated()` 回標準序中第一個未校正弦，驅動 [6.2](06_runtime_view.md#62-情境二校正-calibration-迴圈) 的校正流程。
 
-持久化由 `TuningStore` 負責（`filesDir/tuning.json`，僅 `isCalibrated` 時寫、含 `saved_at`）；壞檔或四弦不齊則 `load()` 回 `null`。JSON 無 schema 版本（技術債，見 [11.2](11_risks_and_technical_debt.md#112-技術債)）。
+持久化由 `TuningStore` 負責（`filesDir/tuning.json`，僅 `isCalibrated` 時寫、含 `a4_hz` 與 `saved_at`）；壞檔或四弦不齊則 `load()` 回 `null`。沒有 `a4_hz` 的舊檔（v1.0.8 前或 Python 版寫的）視為以 A=440 量測，載入時每弦加上 `1200·log2(440/442) ≈ −7.85¢`，同一把琴換算後與用 442 重新校正的結果相同，使用者不必重校。除此之外 JSON 仍無正式 schema 版本（技術債，見 [11.2](11_risks_and_technical_debt.md#112-技術債)）。
 
 ## 8.6 錯誤與權限處理
 
@@ -153,7 +154,7 @@ graph TD
 - **網址下載失敗**：顯示「下載失敗：{原因}」；明文 HTTP 會被系統擋下（Android 9+ 預設）。
 - **跟譜單向性**：學生回頭重拉前段不會倒回（MVP 限制，避免 beam search）；報告以實際走過的 timeline 計分。
 - **校正容錯**：偵測偏離目標弦 >50¢ 或靜音時清空 buffer 重來，避免把錯弦/雜訊記成偏移。
-- **已存校正不被覆蓋**：重新校正是寫進一份新的 `Tuning`，四弦全部完成才取代已存的校正；中途離開或按「略過（A=440）」只影響當次練習，回首頁即恢復已存校正，讓「已校正」標示與「開始練習」的行為一致。
+- **已存校正不被覆蓋**：重新校正是寫進一份新的 `Tuning`，四弦全部完成才取代已存的校正；中途離開或按「略過（A=442）」只影響當次練習，回首頁即恢復已存校正，讓「已校正」標示與「開始練習」的行為一致。
 
 ## 8.7 並行模型
 

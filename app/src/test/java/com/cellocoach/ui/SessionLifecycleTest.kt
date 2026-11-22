@@ -174,7 +174,7 @@ class SessionLifecycleTest {
         assertEquals(Screen.TUNING, vm.screen)
         click(TestTags.TUNING_SKIP)
         assertEquals(Screen.PRACTICE, vm.screen)
-        assertFalse("this run is judged against A=440", vm.tuning.isCalibrated())
+        assertFalse("this run is judged against A=442", vm.tuning.isCalibrated())
 
         click(TestTags.NAV_HOME)
         assertTrue("saved calibration is back in effect", vm.tuning.isCalibrated())

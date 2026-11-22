@@ -58,7 +58,7 @@ C→G→D→A 四條空弦，建立每弦的 cents 基準。見 `core/Tuning.kt`
 
 ### tuning (校正)
 
-把評分基準從硬綁 A=440 改成「使用者這把琴的實際空弦音高」的流程。
+把評分基準從硬綁標準音高（A=442，`A4_HZ`）改成「使用者這把琴的實際空弦音高」的流程。
 開練前拉四條空弦，記錄每弦相對 nominal 值的 cents 偏移，後續評分時依音所在的
 弦扣掉該偏移。校正結果存於 `filesDir/tuning.json`（含 `savedAt`）。見
 `core/Tuning.kt`、`data/TuningStore.kt`，及

@@ -5,10 +5,11 @@ import kotlin.math.ln
 /**
  * Per-string tuning calibration for cello.
  *
- * Port of `tuning.py`. A real cello is rarely exactly at A=440: the A string
+ * Port of `tuning.py`. A real cello is rarely exactly at the reference pitch
+ * (A=[A4_HZ], 442 Hz; the Python original used 440): the A string
  * drifts a few cents between sessions, and the C/G/D strings don't track A
  * perfectly because they use different tensions and ages. If we hardcoded
- * A=440, the "average cents" diagnostic would measure how out-of-tune the
+ * the reference, the "average cents" diagnostic would measure how out-of-tune the
  * *instrument* is, not how out-of-tune the *playing* is.
  *
  * So at the start of each session the student plays each open string. We record
@@ -37,7 +38,7 @@ val STRINGS: List<Pair<String, Int>> = listOf(
 val STRING_NAMES: List<String> = STRINGS.map { it.first }
 
 /**
- * Nominal (A=440) frequency in Hz for an open string.
+ * Nominal (A=[A4_HZ]) frequency in Hz for an open string.
  *
  * @throws NoSuchElementException if [name] is not a known string.
  */

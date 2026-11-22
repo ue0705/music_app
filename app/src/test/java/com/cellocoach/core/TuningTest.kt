@@ -18,9 +18,25 @@ class TuningTest {
     }
 
     @Test
-    fun nominalHzForStringMatchesA440() {
-        // A3 = MIDI 57 = 220 Hz under A=440.
-        assertEquals(220.0, nominalHzForString("A"), 1e-6)
+    fun referencePitchIsA442() {
+        assertEquals(442.0, A4_HZ, 0.0)
+        assertEquals(442.0, midiToHz(69), 1e-9)
+        assertEquals(69, hzToMidi(442.0))
+    }
+
+    @Test
+    fun nominalHzForStringMatchesA442() {
+        // A3 = MIDI 57 = 221 Hz under A=442; C2 = MIDI 36 = 442 * 2^(-33/12).
+        assertEquals(221.0, nominalHzForString("A"), 1e-6)
+        assertEquals(442.0 * Math.pow(2.0, -33.0 / 12.0), nominalHzForString("C"), 1e-9)
+    }
+
+    @Test
+    fun a440PitchIsAboutEightCentsFlatOfA442() {
+        // A string tuned to the old 440 standard now reads ~-7.85 cents.
+        val offset = Tuning().calibrateString("A", 220.0)
+        assertEquals(1200.0 * Math.log(440.0 / 442.0) / Math.log(2.0), offset, 1e-9)
+        assertEquals(-7.85, offset, 0.01)
     }
 
     @Test

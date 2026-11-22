@@ -23,7 +23,7 @@ sequenceDiagram
     MIC->>VM: "onFrame(PitchFrame) → latestFrame"
   end
   loop "每 50 ms（viewModelScope 協程）"
-    VM->>VM: "detectedMidi ＝ round(69 + 12·log2(hz/440)) 或 null"
+    VM->>VM: "detectedMidi ＝ round(69 + 12·log2(hz/442)) 或 null"
     VM->>SF: "observe(detectedMidi)"
     SF-->>VM: "currentNoteIdx() / expectedNote()"
     VM->>SC: "observe(currentNoteIdx, hz)"
@@ -74,7 +74,7 @@ sequenceDiagram
 
 要點：
 - 重新校正寫進一份**新的** `Tuning`；已存的 `savedTuning` 只在四弦全部完成時才被取代。
-- 「略過（使用 A=440）」只讓**這一次**練習以 A=440 為基準；回首頁時 `goHome()` 會恢復 `savedTuning`。所以首頁「已校正」標示與「開始練習」的行為永遠一致（見 [8.6](08_crosscutting_concepts.md#86-錯誤與權限處理)）。
+- 「略過（使用 A=442）」只讓**這一次**練習以 A=442 為基準；回首頁時 `goHome()` 會恢復 `savedTuning`。所以首頁「已校正」標示與「開始練習」的行為永遠一致（見 [8.6](08_crosscutting_concepts.md#86-錯誤與權限處理)）。
 - 中途按左上「首頁」離開，同樣恢復已存校正。
 
 ## 6.3 情境三：練習 → 報告 (Practice → Report)

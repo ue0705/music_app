@@ -93,6 +93,48 @@ class TuningStoreTest {
     }
 
     @Test
+    fun saveRecordsReferencePitch() {
+        val store = TuningStore(tmp.root)
+        store.save(calibratedTuning())
+        val text = java.io.File(tmp.root, TuningStore.FILE_NAME).readText()
+        assertTrue("saved file should record a4_hz: $text", text.contains("\"a4_hz\": 442.0"))
+    }
+
+    @Test
+    fun legacyFileWithoutReferenceIsRebasedFromA440() {
+        // Written before v1.0.8 (and by the Python version): offsets vs A=440, no a4_hz.
+        val legacy = StringBuilder("{\n  \"offsets\": {\n")
+        legacy.append(STRING_NAMES.joinToString(",\n") { "    \"$it\": 0.0" })
+        legacy.append("\n  },\n  \"saved_at\": \"2026-06-19T10:00:00\"\n}\n")
+        tmp.newFile(TuningStore.FILE_NAME).writeText(legacy.toString())
+
+        val loaded = TuningStore(tmp.root).load()
+
+        assertNotNull(loaded)
+        // A string exactly at A=440 pitch is ~7.85 cents flat of A=442.
+        val expected = 1200.0 * Math.log(440.0 / 442.0) / Math.log(2.0)
+        for (name in STRING_NAMES) {
+            assertEquals("offset for $name", expected, loaded!!.offsets[name]!!, 1e-9)
+        }
+        // Same physical pitch, same result as calibrating fresh against A=442.
+        val fresh = Tuning().apply { calibrateString("A", 220.0) }
+        assertEquals(fresh.offsets["A"]!!, loaded!!.offsets["A"]!!, 1e-9)
+    }
+
+    @Test
+    fun fileAtCurrentReferenceIsNotRebased() {
+        val current = StringBuilder("{\n  \"offsets\": {\n")
+        current.append(STRING_NAMES.joinToString(",\n") { "    \"$it\": 1.5" })
+        current.append("\n  },\n  \"a4_hz\": 442.0,\n  \"saved_at\": \"2026-11-22T10:00:00\"\n}\n")
+        tmp.newFile(TuningStore.FILE_NAME).writeText(current.toString())
+
+        val loaded = TuningStore(tmp.root).load()
+
+        assertNotNull(loaded)
+        for (name in STRING_NAMES) assertEquals(1.5, loaded!!.offsets[name]!!, 1e-9)
+    }
+
+    @Test
     fun loadReturnsNullWhenFileCorrupt() {
         tmp.newFile(TuningStore.FILE_NAME).writeText("this is not json {{{")
         val store = TuningStore(tmp.root)
