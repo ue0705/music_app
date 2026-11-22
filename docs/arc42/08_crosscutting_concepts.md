@@ -129,8 +129,8 @@ graph TD
 
 | 模式 | 作法 | 效果 |
 |---|---|---|
-| 慢速（75% / 50%） | `engineNotes()` 把每顆音的 `start/end` 除以 `tempoFactor` 後交給 follower 與 scorer；倒數拍長 `beatMs = 60000 / (bpm × tempoFactor)`（下限 120 ms） | 逾時、休止、80% 規則全部跟著放慢；五線譜顯示不變 |
-| 等正確（`waitForCorrect = true`） | 停在目前音；**目前音**連續正確 5 tick 才前進；沒有 timeout 與 lookahead；休止依時間前進；不播持續拍點 | 逐音慢練；沒拉對就一直停著 |
+| 自選速度（♩ = `practiceBpm`，30–240） | 首頁以 − / + （±1）與滑桿設定，取整數；載入曲目時重設為樂譜原速 `bpm`。`tempoFactor = practiceBpm / bpm`，`engineNotes()` 把每顆音的 `start/end` 除以它後交給 follower 與 scorer；倒數拍長 `beatMs = 60000 / practiceBpm`（下限 120 ms） | 逾時、休止、80% 規則全部跟著所選速度縮放（可慢也可快）；五線譜顯示不變；練習畫面右上顯示「♩ = N」 |
+| 等正確（`waitForCorrect = true`） | 獨立開關，可搭配任何速度。停在目前音；**目前音**連續正確 5 tick 才前進；沒有 timeout 與 lookahead；休止依（縮放後的）時間前進；不播持續拍點 | 逐音慢練；沒拉對就一直停著 |
 
 ## 8.5 調音偏移模型
 

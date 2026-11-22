@@ -62,7 +62,6 @@ graph TD
 | **Robolectric 渲染為近似** | Compose 在 Robolectric 下為 shadow 近似，像素級正確性需人工/instrumented 確認 | 關鍵畫面以選用 instrumented 測試或實機截圖補強 |
 | **煙霧測試沒有先捲動** | `AppSmokeTest` 直接斷言「開始練習」已顯示；手機橫放、螢幕小或曲目多時按鈕在畫面外，測試失敗（2026-11 實機發生） | 斷言前先 `performScrollTo()` |
 | **APK 偏大** | debug APK 約 16.3 MB：未開 R8，且引入整包 `material-icons-extended`，實際只用到 `Icons.Filled.Home`（在核心圖示庫內） | release 開 `isMinifyEnabled`；移除 `material-icons-extended`；`datastore-preferences` 也未使用 |
-| **首頁練習速度列在窄螢幕擠壓** | 四個按鈕（原速／75%／50%／等正確）放同一列，直向手機上「等正確」被擠成三行 | 改成可換行的排列或分段按鈕 |
 | **選到無法解析的曲目** | 不會崩潰，但引擎沿用上一首的音符，畫面上的曲名已換 | `loadScore` 失敗時回復選取並提示 |
 | **匯入的曲目無法刪除** | `ScoreLibrary.delete` 已實作，但沒有 UI 入口 | 在曲目卡片加刪除 |
 

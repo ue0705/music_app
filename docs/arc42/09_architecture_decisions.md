@@ -276,6 +276,9 @@ ViewModel 被銷毀才停止。結果：
 - **慢速（75% / 50%）**：不改 follower，而是把交給引擎的 timeline 整體拉長
   （`engineNotes()`：`start/end ÷ tempoFactor`），倒數拍長同比例放慢；畫面上的五線譜
   不變。
+  - **v1.0.9 更新**：固定的 75% / 50% 改為節拍器式自選速度「♩ = N」（30–240），
+    `tempoFactor` 改由 `practiceBpm / bpm` 推導，可慢也可快；「等正確」改為獨立開關，
+    可與任何速度搭配。縮放 timeline 的機制不變，所以本 ADR 的決策仍成立。
 - **等正確**：在 `ScoreFollower` 加入獨立的 `waitForCorrect` 路徑（`observeWait`）：
   停在目前音，直到該音連續正確 `ADVANCE_THRESHOLD_TICKS` 次才前進；沒有逾時、
   沒有 lookahead；休止依時間前進；不播持續拍點。預設 `false`，原路徑完全不變。

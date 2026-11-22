@@ -16,7 +16,7 @@
 | D6 單一 Activity + Compose 狀態切換 | 四個畫面以 Compose 狀態切換，不引入 Navigation 套件 | 限制 T2、減少相依（T10） |
 | D7 ViewModel 集中協調 | `PracticeViewModel` 持有 follower/scorer/tuning，訂閱 `PitchSource`，50ms tick 比照 `main.py` 迴圈，以 Compose `State` 暴露 | G1/G2、品質目標「即時性」 |
 | D8 麥克風生命週期由狀態推導 | 是否收音 = 有權限 ∧ App 在前景 ∧ 畫面為 Tuning/Practice，由 `syncMic()` 在每次狀態改變時重算，而非散落在各個按鈕 | G11、[ADR-004](09_architecture_decisions.md#adr-004-麥克風只在需要時開啟-由狀態推導) |
-| D9 練習模式不動演算法常數 | 慢速練習把「給引擎的 timeline」整體拉長；「等正確」是 follower 的另一條獨立路徑。Python 移植的預設路徑保持不變 | G9、[ADR-005](09_architecture_decisions.md#adr-005-練習模式-慢速與等正確-不改動移植常數) |
+| D9 練習模式不動演算法常數 | 自選練習速度（♩ = N）把「給引擎的 timeline」整體依 `practiceBpm / bpm` 縮放；「等正確」是 follower 的另一條獨立路徑。Python 移植的預設路徑保持不變 | G9、[ADR-005](09_architecture_decisions.md#adr-005-練習模式-慢速與等正確-不改動移植常數) |
 | D10 匯入與匯出走系統元件 | 匯入用 Storage Access Framework 的 `OpenDocument` 與一次性的 HTTPS 下載；匯出用 `FileProvider` + 系統分享，App 不自己管理帳號或雲端 | G8、G10、限制 T10/T11 |
 
 ## 4.2 README 功能 → Android 模組對應
@@ -37,7 +37,7 @@
 | 節拍器倒數（開始前 4 拍，依 BPM） | G6 | `ui/PracticeViewModel`（`countdown` 狀態、`startCountdown`）+ `audio/Metronome`（`ToneGenerator`，可開關） | `core/LoadedScore.bpm` | `main.py` tick loops |
 | 移除 HTTPS/LAN 連線痛點 | G7 | 整體架構（單一 App，無 server） | — | 取代 Flask + SSE + `--ssl` |
 | 匯入樂譜（檔案 / 網址） | G8 | `ui/screens/HomeScreen`（檔案選擇器、網址對話框）+ `PracticeViewModel.importScore` / `importFromUrl` | `data/ScoreLibrary`（`filesDir/scores`）、`core/ScoreLoader`（先解析驗證） | 無（Android 新增） |
-| 慢速練習（原速 / 75% / 50%） | G9 | `PracticeViewModel.setPracticeMode`（`engineNotes()` 拉長 timeline、`beatMs()` 放慢倒數） | `core/ScoreFollower` | 無（Android 新增） |
+| 節拍器式練習速度（♩ = 30–240）與等正確開關 | G9 | `PracticeViewModel.changePracticeBpm` / `adjustPracticeBpm` / `resetPracticeBpm` / `changeWaitMode`（`engineNotes()` 縮放 timeline、`beatMs()` 依所選速度倒數） | `core/ScoreFollower` | 無（Android 新增） |
 | 「等正確」逐音模式 | G9 | `core/ScoreFollower(waitForCorrect = true)` | `PracticeViewModel.waitMode` | 無（Android 新增） |
 | 報告匯出給老師 | G10 | `core/ReportHtml`（純字串產生 HTML）+ `ui/screens/ReportScreen`（`FileProvider` + `ACTION_SEND`） | `PracticeViewModel.buildReportFile`（`cacheDir/reports`） | 無（Android 新增） |
 | 麥克風權限與生命週期 | G11 | `MainActivity`（權限、前景）+ `PracticeViewModel.syncMic` + `CelloCoachApp` 權限橫幅 | `audio/AudioPitchSource`（可重複 start/stop） | 無（Android 新增） |

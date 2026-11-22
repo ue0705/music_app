@@ -76,8 +76,15 @@ ADVANCE_THRESHOLD_TICKS 才前進，超過 TIMEOUT_FACTOR×音長則強制前進
 
 Android 版新增的練習模式：游標停在目前音，直到**這顆音**連續正確
 `ADVANCE_THRESHOLD_TICKS`（5）個 tick 才前進，沒有逾時、沒有 lookahead；休止符照
-時間前進。適合逐音慢練。見 `ScoreFollower(waitForCorrect = true)`、
+時間前進。適合逐音慢練。首頁的獨立開關，可搭配任何練習速度。見
+`ScoreFollower(waitForCorrect = true)`、
 [ADR-005](09_architecture_decisions.md#adr-005-練習模式-慢速與等正確-不改動移植常數)。
+
+### 練習速度 (♩ = N)
+
+節拍器式的練習速度：每分鐘幾個四分音符。首頁以 − / + 與滑桿設定（30–240），
+載入曲目時預設為樂譜原速；引擎時間軸依 `practiceBpm / bpm` 縮放。見
+`PracticeViewModel.practiceBpm`、[8.4](08_crosscutting_concepts.md#84-跟譜遲滯-hysteresis-與前進邏輯)。
 
 ## 技術名詞 (演算法 / 工具 / 環境)
 

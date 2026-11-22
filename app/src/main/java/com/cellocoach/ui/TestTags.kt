@@ -31,6 +31,12 @@ object TestTags {
     const val HOME_IMPORT_URL = "home_import_url"
     const val HOME_IMPORT_STATUS = "home_import_status"
     const val HOME_TEMPO = "home_tempo"
+    const val HOME_BPM_VALUE = "home_bpm_value"
+    const val HOME_BPM_MINUS = "home_bpm_minus"
+    const val HOME_BPM_PLUS = "home_bpm_plus"
+    const val HOME_BPM_SLIDER = "home_bpm_slider"
+    const val HOME_BPM_RESET = "home_bpm_reset"
+    const val HOME_WAIT_MODE = "home_wait_mode"
     const val HOME_METRONOME = "home_metronome"
     const val URL_INPUT = "url_input"
     const val URL_CONFIRM = "url_confirm"
@@ -52,6 +58,7 @@ object TestTags {
     const val PRACTICE_COUNTDOWN = "practice_countdown"
     const val PRACTICE_SCORE_VIEW = "practice_score_view"
     const val PRACTICE_RESET = "practice_reset"
+    const val PRACTICE_TEMPO = "practice_tempo"
 
     // ---- Report ------------------------------------------------------------
     const val REPORT_SCORE = "report_score"

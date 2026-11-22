@@ -91,9 +91,9 @@ sequenceDiagram
 
   U->>UI: "開始練習（已校正）"
   UI->>VM: "goToPractice()"
-  VM->>VM: "resetEngine()：依 tempoFactor / waitMode 建 follower 與 scorer"
+  VM->>VM: "resetEngine()：依 practiceBpm / bpm 縮放 timeline、依 waitMode 建 follower 與 scorer"
   VM->>MIC: "show(PRACTICE) → syncMic() → start()"
-  VM->>VM: "4 拍倒數（beatMs ＝ 60000 / (bpm × tempoFactor)，節拍器開時發聲）"
+  VM->>VM: "4 拍倒數（beatMs ＝ 60000 / practiceBpm，節拍器開時發聲）"
   VM->>SF: "start()"
   loop "每 50 ms 直到 isDone()"
     VM->>SF: "observe(detectedMidi)"

@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cellocoach.ui.PracticeViewModel
 import com.cellocoach.ui.TestTags
+import kotlin.math.roundToInt
 
 /**
  * Home screen — score picker (bundled + imported), import (file / URL), practice
@@ -116,32 +118,59 @@ fun HomeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        // ---- Practice speed / mode ----
+        // ---- Practice tempo (metronome-style ♩ = N) ----
         Text("練習速度", style = MaterialTheme.typography.titleSmall)
         Row(
-            modifier = Modifier.testTag(TestTags.HOME_TEMPO),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().testTag(TestTags.HOME_TEMPO),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // (label, waitMode, tempoFactor)
-            val options = listOf(
-                Triple("原速", false, 1.0),
-                Triple("75%", false, 0.75),
-                Triple("50%", false, 0.5),
-                Triple("等正確", true, 1.0),
-            )
-            options.forEach { (label, wait, f) ->
-                val selected = if (wait) vm.waitMode else (!vm.waitMode && vm.tempoFactor == f)
-                if (selected) {
-                    Button(onClick = { vm.setPracticeMode(wait, f) }) { Text(label) }
-                } else {
-                    OutlinedButton(onClick = { vm.setPracticeMode(wait, f) }) { Text(label) }
-                }
-            }
-        }
-        if (vm.waitMode) {
+            OutlinedButton(
+                onClick = { vm.adjustPracticeBpm(-1) },
+                enabled = vm.practiceBpm > PracticeViewModel.MIN_PRACTICE_BPM,
+                modifier = Modifier.testTag(TestTags.HOME_BPM_MINUS),
+            ) { Text("−") }
             Text(
-                "等正確：拉對目前這顆音才會前進，適合逐句慢練。",
+                text = "♩ = ${vm.practiceBpm.roundToInt()}",
+                modifier = Modifier.testTag(TestTags.HOME_BPM_VALUE),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            OutlinedButton(
+                onClick = { vm.adjustPracticeBpm(+1) },
+                enabled = vm.practiceBpm < PracticeViewModel.MAX_PRACTICE_BPM,
+                modifier = Modifier.testTag(TestTags.HOME_BPM_PLUS),
+            ) { Text("+") }
+        }
+        Slider(
+            value = vm.practiceBpm.toFloat(),
+            onValueChange = { vm.changePracticeBpm(it.toDouble()) },
+            valueRange = PracticeViewModel.MIN_PRACTICE_BPM.toFloat()..PracticeViewModel.MAX_PRACTICE_BPM.toFloat(),
+            modifier = Modifier.fillMaxWidth().testTag(TestTags.HOME_BPM_SLIDER),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "樂譜原速 ♩ = ${vm.bpm.roundToInt()}",
                 style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(
+                onClick = { vm.resetPracticeBpm() },
+                enabled = vm.practiceBpm.roundToInt() != vm.bpm.roundToInt(),
+                modifier = Modifier.testTag(TestTags.HOME_BPM_RESET),
+            ) { Text("回到原速") }
+        }
+
+        // ---- Wait-until-correct drill (works at any tempo) ----
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = vm.waitMode,
+                onCheckedChange = { vm.changeWaitMode(it) },
+                modifier = Modifier.testTag(TestTags.HOME_WAIT_MODE),
+            )
+            Text(
+                "等正確：拉對目前這顆音才會前進，適合逐句慢練",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 8.dp),
             )
         }
 

@@ -105,15 +105,24 @@ class PracticeViewModel(
     var selectedScore by mutableStateOf(availableScores.firstOrNull() ?: DEFAULT_SCORE)
         private set
 
+    /** The score's own tempo in quarter-note BPM (from MusicXML, default 120). */
     var bpm by mutableStateOf(120.0)
         private set
 
-    /** Practice tempo multiplier: 1.0 = score tempo, 0.75/0.5 = slower practice. */
-    var tempoFactor by mutableStateOf(1.0)
+    /**
+     * Practice tempo chosen by the student, metronome-style: ♩ = [practiceBpm]
+     * (quarter-note beats per minute). Reset to the score's [bpm] whenever a score
+     * is loaded; clamped to [MIN_PRACTICE_BPM]..[MAX_PRACTICE_BPM].
+     */
+    var practiceBpm by mutableStateOf(120.0)
         private set
 
+    /** Practice tempo relative to the score: < 1 slower, > 1 faster. Derived from [practiceBpm]. */
+    val tempoFactor: Double
+        get() = practiceBpm / bpm.coerceAtLeast(1.0)
+
     /** "Wait until correct" mode — the cursor only advances once you play each
-     *  note right (no timeout). Orthogonal to [tempoFactor]. */
+     *  note right (no timeout). Orthogonal to [practiceBpm]. */
     var waitMode by mutableStateOf(false)
         private set
 
@@ -215,15 +224,17 @@ class PracticeViewModel(
     /** Whether [pitchSource] is running. Read on the audio thread to drop late frames. */
     @Volatile private var sourceStarted = false
 
-    /** Note timeline handed to the engine, stretched for slow practice so the
-     *  follower's time-based fallbacks scale with the chosen tempo. Display
-     *  ([scoreNotes]) stays unscaled — only timing changes. */
-    private fun engineNotes(): List<ScoreNote> =
-        if (tempoFactor >= 0.999) notes
-        else notes.map { it.copy(start = it.start / tempoFactor, end = it.end / tempoFactor) }
+    /** Note timeline handed to the engine, rescaled from the score tempo to the
+     *  chosen [practiceBpm] so the follower's time-based fallbacks follow it.
+     *  Display ([scoreNotes]) stays unscaled — only timing changes. */
+    private fun engineNotes(): List<ScoreNote> {
+        val f = tempoFactor
+        return if (kotlin.math.abs(f - 1.0) < 1e-3) notes
+        else notes.map { it.copy(start = it.start / f, end = it.end / f) }
+    }
 
-    /** Effective metronome beat at the current practice tempo. */
-    private fun beatMs(): Long = (60_000.0 / (bpm * tempoFactor)).toLong().coerceAtLeast(120L)
+    /** Metronome beat (one quarter note) at the chosen practice tempo. */
+    private fun beatMs(): Long = (60_000.0 / practiceBpm).toLong().coerceAtLeast(120L)
 
     init {
         loadSavedTuning()
@@ -300,19 +311,27 @@ class PracticeViewModel(
         show(Screen.HOME)
     }
 
-    /** Set the practice tempo multiplier (e.g. 1.0, 0.75, 0.5). */
-    fun setPracticeTempo(factor: Double) {
-        tempoFactor = factor.coerceIn(0.25, 1.0)
-        resetEngine() // rebuild follower with the rescaled timeline
+    /**
+     * Set the practice tempo as ♩ = [value] BPM (rounded to a whole number and
+     * clamped to [MIN_PRACTICE_BPM]..[MAX_PRACTICE_BPM]). Rebuilds the follower
+     * with the rescaled timeline.
+     */
+    fun changePracticeBpm(value: Double) {
+        val clamped = value.coerceIn(MIN_PRACTICE_BPM, MAX_PRACTICE_BPM).roundToInt().toDouble()
+        if (clamped == practiceBpm) return
+        practiceBpm = clamped
+        resetEngine()
     }
 
-    /**
-     * Choose a practice mode: either a tempo multiplier (wait=false) or the
-     * wait-until-correct drill (wait=true). Rebuilds the follower.
-     */
-    fun setPracticeMode(wait: Boolean, factor: Double = 1.0) {
-        waitMode = wait
-        tempoFactor = factor.coerceIn(0.25, 1.0)
+    /** Nudge the practice tempo by [delta] BPM (the − / + buttons). */
+    fun adjustPracticeBpm(delta: Int) = changePracticeBpm(practiceBpm + delta)
+
+    /** Go back to the score's own tempo. */
+    fun resetPracticeBpm() = changePracticeBpm(bpm)
+
+    /** Turn the wait-until-correct drill on or off. Rebuilds the follower. */
+    fun changeWaitMode(on: Boolean) {
+        waitMode = on
         resetEngine()
     }
 
@@ -571,6 +590,8 @@ class PracticeViewModel(
         val loaded = runCatching { ScoreLoader.load(bytes) }.getOrNull() ?: return
         notes = loaded.notes
         bpm = loaded.bpm
+        // A new score starts at its own tempo (still within the selectable range).
+        practiceBpm = loaded.bpm.coerceIn(MIN_PRACTICE_BPM, MAX_PRACTICE_BPM).roundToInt().toDouble()
         resetEngine()
     }
 
@@ -698,6 +719,10 @@ class PracticeViewModel(
 
         /** Consecutive stable ticks needed to accept a string (1.5 s at 50 ms). */
         const val CALIB_REQUIRED_TICKS = 30
+
+        /** Selectable practice tempo range, ♩ = 30..240 (a typical metronome's span). */
+        const val MIN_PRACTICE_BPM = 30.0
+        const val MAX_PRACTICE_BPM = 240.0
 
         private const val DEFAULT_SCORE = "g_major_scale.musicxml"
 

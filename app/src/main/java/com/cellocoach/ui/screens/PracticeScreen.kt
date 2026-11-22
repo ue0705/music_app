@@ -25,6 +25,7 @@ import com.cellocoach.ui.FeedbackColors
 import com.cellocoach.ui.PracticeViewModel
 import com.cellocoach.ui.ScoreView
 import com.cellocoach.ui.TestTags
+import kotlin.math.roundToInt
 
 /**
  * Practice screen.
@@ -44,10 +45,22 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = vm.selectedScore,
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = vm.selectedScore,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "♩ = ${vm.practiceBpm.roundToInt()}" + if (vm.waitMode) "・等正確" else "",
+                    modifier = Modifier.testTag(TestTags.PRACTICE_TEMPO),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
 
             ScoreView(
                 notes = vm.scoreNotes,

@@ -221,12 +221,16 @@ object ReportHtml {
       // 導覽：Screen { HOME, TUNING, PRACTICE, REPORT }
       fun selectScore(name: String); fun onStartPressed(); fun beginCalibration(); fun skipCalibration()
       fun goToPractice(); fun resetPractice(); fun goHome()
-      fun setPracticeTempo(factor: Double); fun setPracticeMode(wait: Boolean, factor: Double = 1.0); fun toggleMetronome()
+      // 練習速度：♩ = practiceBpm（30–240，載入曲目時＝樂譜 bpm）；tempoFactor = practiceBpm / bpm（唯讀）
+      val bpm: Double; val practiceBpm: Double; val tempoFactor: Double; val waitMode: Boolean
+      fun changePracticeBpm(value: Double); fun adjustPracticeBpm(delta: Int); fun resetPracticeBpm()
+      fun changeWaitMode(on: Boolean); fun toggleMetronome()
       fun onMicPermissionChanged(granted: Boolean); fun onForegroundChanged(foreground: Boolean)
       fun importScore(displayName: String, bytes: ByteArray); fun importFromUrl(url: String); fun clearImportStatus()
       fun buildReportFile(): File?
       internal fun stepForTest()
-      companion object { const val TICK_MS = 50L; const val CALIB_REQUIRED_TICKS = 30; fun factory(app, source) }
+      companion object { const val TICK_MS = 50L; const val CALIB_REQUIRED_TICKS = 30
+                         const val MIN_PRACTICE_BPM = 30.0; const val MAX_PRACTICE_BPM = 240.0; fun factory(app, source) }
   }
   ```
   - 麥克風：`syncMic()` 在每次狀態改變時重算「有權限 ∧ 前景 ∧ 畫面為 TUNING/PRACTICE」決定 start/stop；背景中的練習會重設，回前景重新倒數。
