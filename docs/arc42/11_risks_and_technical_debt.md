@@ -1,4 +1,6 @@
-# 11. 風險與技術債（Risks and Technical Debt）
+# 11. 風險與技術債 (Risks and Technical Debt)
+
+> arc42 第 11 章。上層：[文件索引](index.md)。相關：[7. 部署視圖](07_deployment_view.md) ｜ [9. 架構決策](09_architecture_decisions.md)。
 
 本章記錄 CelloCoach Android app 已知的風險與技術債，分為兩類：
 
@@ -17,11 +19,13 @@
 graph TD
     R["風險"] --> RA["演算法/領域"]
     R --> RE["Android/環境"]
-    RA --> RA1["只追第一個 part"]
+    RA --> RA1["只追第一個 part、單聲部"]
     RA --> RA2["吵雜房間偵測不穩"]
+    RA --> RA3["匯入的樂譜可能不受支援"]
     RE --> RE1["WSL2 USB passthrough 脆弱"]
     RE --> RE2["emulator 無真實麥克風"]
-    RE --> RE3["RECORD_AUDIO 權限被拒"]
+    RE --> RE3["HyperOS 對 adb / instrumentation 的限制"]
+    RE --> RE4["不同機器的 debug 簽章"]
 ```
 
 ### 演算法/領域風險（延續參考實作）
@@ -30,16 +34,20 @@ graph TD
 |---|---|---|
 | **Score follower 只能往前**（forward-only） | 學生回頭重拉前段，光標不會倒回；timeout 會強制前進 | MVP 範圍內；倒退需 beam search，超出範圍。見 [score follower](12_glossary.md#score-follower-跟譜器) |
 | **只追蹤第一個 part** | 多聲部曲目會跟到非主旋律聲部；伴奏譜會跟到鋼琴右手 | `ScoreLoader` 僅取第一個 part（見 [CONTRACTS.md](../../CONTRACTS.md)）；以單聲部教材為主 |
-| **吵雜房間偵測不穩** | 環境噪音、其他樂器、共鳴會讓 [NSDF](12_glossary.md#nsdf) clarity 下降，產生漏抓或誤抓 | clarity 門檻 0.9 + cello 音域 [fmin,fmax]=[60,1100] 過濾；安靜環境效果最佳。對應 [延遲品質](10_quality_requirements.md#41-延遲-latency) |
+| **匯入的樂譜可能不受支援** | 同一 part 內多聲部（`<backup>`）會讓 timeline 亂序；連結線拆成兩顆音；裝飾音變成 0 長度的音；反覆記號不展開 | 已列於 [8.1](08_crosscutting_concepts.md#81-樂譜解析-musicxml)；內建的 G 大調音階、小星星，以及專案外附的 Canon 大提琴分譜都是單一 part、沒有 `<backup>`（Canon 有 1 處連結線） |
+| **從網址匯入的輸入未設上限** | 下載沒有大小上限；XML 未開 secure-processing，惡意檔案可能耗盡記憶體 | 僅使用者主動輸入網址時發生；Android 9+ 只允許 HTTPS。必要時加入大小上限與 `FEATURE_SECURE_PROCESSING` |
+| **吵雜房間偵測不穩** | 環境噪音、其他樂器、共鳴會讓 [NSDF](12_glossary.md#nsdf) clarity 下降，產生漏抓或誤抓 | clarity 門檻 0.9 + cello 音域 [fmin,fmax]=[60,1100] 過濾；安靜環境效果最佳。對應 [延遲品質](10_quality_requirements.md#1031-延遲-latency) |
 | **無 OMR** | 只支援已有 MusicXML 的曲目，不能拍譜照辨識 | 設計外範圍；提供 assets 內建曲與外部 `.musicxml/.mxl` 載入 |
 
 ### Android/環境風險（本次移植新增）
 
 | 風險 | 影響 | 緩解 / 現況 |
 |---|---|---|
-| **WSL2 USB passthrough 脆弱** | 在 WSL2 下，把 USB 裝置送進 Linux 端需 `usbipd-win` bind/attach + 容器 `--privileged --device=/dev/bus/usb`；連線常因重插、休眠、Windows 更新而掉 | **多數情況不需要**：WSL2 可直接呼叫 Windows 的 `adb.exe` 經 USB 部署（見 [§11.3 路線 A](#113-實機部署路徑wsl2) 與 [scripts/deploy-windows-adb.sh](../../scripts/deploy-windows-adb.sh)）。需要 Linux adb 直吃 USB 時才走 usbipd（[路線 C](#113-實機部署路徑wsl2)）。詳見 [WSL2](12_glossary.md#wsl2) |
+| **WSL2 USB passthrough 脆弱** | 在 WSL2 下，把 USB 裝置送進 Linux 端需 `usbipd-win` bind/attach + 容器 `--privileged --device=/dev/bus/usb`；連線常因重插、休眠、Windows 更新而掉 | **多數情況不需要**：WSL2 可直接呼叫 Windows 的 `adb.exe` 經 USB 部署（見 [§11.3 路線 A](#113-實機部署路徑-wsl2) 與 [scripts/deploy-windows-adb.sh](../../scripts/deploy-windows-adb.sh)）。需要 Linux adb 直吃 USB 時才走 usbipd（[路線 C](#113-實機部署路徑-wsl2)）。詳見 [WSL2](12_glossary.md#wsl2) |
 | **emulator 無真實麥克風** | 虛擬麥克風無法收真實演奏音高，無法在 emulator 驗證即時音準 | CI/螢幕驗證改用 `FakePitchSource` 腳本音高（[ADR-003](09_architecture_decisions.md#adr-003-robolectric-jvm-可執行的-uie2e-測試)）；emulator 僅跑啟動煙霧測試 |
-| **`RECORD_AUDIO` 執行期權限** | 使用者拒絕授權則無法偵測；需 UI 層處理請求流程 | UI 層取得權限，`AudioPitchSource` 假設已授權（見 [CONTRACTS.md](../../CONTRACTS.md)） |
+| **`RECORD_AUDIO` 執行期權限** | 使用者拒絕授權則無法偵測 | **已緩解**：`MainActivity` 回報權限狀態，被拒時不收音、各畫面顯示橫幅與重試／設定頁入口（[ADR-004](09_architecture_decisions.md#adr-004-麥克風只在需要時開啟-由狀態推導)、[6.6](06_runtime_view.md#66-情境五麥克風權限)），已在實機驗證 |
+| **HyperOS（Xiaomi）對 adb 的限制** | USB 安裝要在手機上確認；`input tap` 需「USB 偵錯（安全設定）」並 `adb usb` 重啟 adbd；instrumentation 從背景啟動 Activity 被擋（測試卡住） | 實機驗證改用 `scripts/phone.sh`（[7.5](07_deployment_view.md#75-macos-本機工具鏈--usb-實機路徑)、[`device-verify` skill](../../.claude/skills/device-verify/SKILL.md)）；instrumented 測試在 emulator 跑 |
+| **不同機器的 debug 簽章** | 手機上若是別台電腦建置的版本，`adb install -r` 失敗，解除安裝會清掉校正與匯入的曲目 | 固定在同一環境建置（devcontainer 掛 `cellocoach-android` volume；macOS 用 `ANDROID_USER_HOME`）；必要時先以 `run-as` 備份 `files/` |
 | **emulator 需 KVM** | devcontainer 須以 `--device=/dev/kvm` 啟動，否則 instrumented 測試極慢/失敗 | devcontainer `runArgs` 已含 `/dev/kvm`；CI 用 [run-emulator-tests.sh](../../scripts/run-emulator-tests.sh) 以 swiftshader 軟體 GPU headless 啟動 |
 | **裝置麥克風品質差異** | 不同手機麥克風頻響不同，影響 cents 準確度 | [tuning 校正](12_glossary.md#tuning-校正)以使用者自己的琴為基準，吸收部分差異 |
 
@@ -48,14 +56,20 @@ graph TD
 | 技術債 | 說明 | 償還方向 |
 |---|---|---|
 | **指法→弦對應簡化** | 高把位的音一律算成「最高開弦」來套校正偏移（差通常 < 5¢）。見 `Tuning.stringForMidi` / [open string](12_glossary.md#open-string-空弦) | 若要支援大跨度把位/拇指把位，需更細的把位推論 |
-| **受限的原生樂譜渲染** | [ADR-001](09_architecture_decisions.md#adr-001-原生-compose-canvas-樂譜渲染而非-webview--osmd) 自繪五線譜，僅支援單聲部子集，複雜記譜（連音線、反覆、裝飾音）支援不足 | 視需求擴充 `ScoreView`，或在「需要完整排版」時再評估引擎 |
+| **受限的原生樂譜渲染** | [ADR-001](09_architecture_decisions.md#adr-001-原生-compose-canvas-樂譜渲染-而非-webview--osmd) 自繪五線譜，僅支援單聲部子集，複雜記譜（連音線、反覆、裝飾音）支援不足 | 視需求擴充 `ScoreView`，或在「需要完整排版」時再評估引擎 |
 | **校正儲存無 schema 版本** | `filesDir/tuning.json` 是純文字 JSON，無 schema 版本管理；改格式可能要手動清舊檔（含 `savedAt` ISO 時間） | 加入版本欄位與遷移邏輯 |
 | **MusicXML 解析自製** | 不用 music21，改以 JDK `javax.xml` 自解析（見 [CONTRACTS.md](../../CONTRACTS.md)），覆蓋的 MusicXML 特性有限 | 依實際曲目逐步補齊解析分支 |
-| **Robolectric 渲染為近似** | Compose 在 Robolectric 下為 shadow 近似，像素級正確性需人工/instrumented 確認 | 關鍵畫面以選用 instrumented 測試補強 |
+| **Robolectric 渲染為近似** | Compose 在 Robolectric 下為 shadow 近似，像素級正確性需人工/instrumented 確認 | 關鍵畫面以選用 instrumented 測試或實機截圖補強 |
+| **煙霧測試沒有先捲動** | `AppSmokeTest` 直接斷言「開始練習」已顯示；手機橫放、螢幕小或曲目多時按鈕在畫面外，測試失敗（2026-11 實機發生） | 斷言前先 `performScrollTo()` |
+| **APK 偏大** | debug APK 約 16.3 MB：未開 R8，且引入整包 `material-icons-extended`，實際只用到 `Icons.Filled.Home`（在核心圖示庫內） | release 開 `isMinifyEnabled`；移除 `material-icons-extended`；`datastore-preferences` 也未使用 |
+| **首頁練習速度列在窄螢幕擠壓** | 四個按鈕（原速／75%／50%／等正確）放同一列，直向手機上「等正確」被擠成三行 | 改成可換行的排列或分段按鈕 |
+| **選到無法解析的曲目** | 不會崩潰，但引擎沿用上一首的音符，畫面上的曲名已換 | `loadScore` 失敗時回復選取並提示 |
+| **匯入的曲目無法刪除** | `ScoreLibrary.delete` 已實作，但沒有 UI 入口 | 在曲目卡片加刪除 |
+| **`ReportScreen` 使用已棄用的 `Divider`** | 編譯警告 | 改用 `HorizontalDivider` |
 
-## 11.3 實機部署路徑（WSL2）
+## 11.3 實機部署路徑 (WSL2)
 
-在 WSL2 開發、要把 APK 裝到「插在 Windows 上的」實機，有三條路。**對日常 sideload 而言路線 A 最簡單、最穩，是預設建議**；路線 B/C 只在你需要 Linux 端（容器內）的 adb 直接看到裝置時才用。
+在 WSL2 開發、要把 APK 裝到「插在 Windows 上的」實機，有三條路（macOS 直接插 USB 的路徑見 [7.5](07_deployment_view.md#75-macos-本機工具鏈--usb-實機路徑)）。**對日常 sideload 而言路線 A 最簡單、最穩，是預設建議**；路線 B/C 只在你需要 Linux 端（容器內）的 adb 直接看到裝置時才用。
 
 ```mermaid
 graph LR
@@ -70,7 +84,7 @@ graph LR
     C --> P
 ```
 
-### 路線 A（建議）：WSL2 直接用 Windows adb，免 usbipd
+### 11.3.1 路線 A (建議)：WSL2 直接用 Windows adb，免 usbipd
 
 手機插在 Windows、由 Windows 的 USB 驅動辨識，Windows 已安裝 platform-tools（`adb.exe`）。WSL2 可直接呼叫 `adb.exe`，因此**不需要把 USB 送進 WSL 核心**。
 
@@ -89,7 +103,7 @@ bash scripts/deploy-windows-adb.sh
 >
 > Windows 若未裝 adb：`winget install Google.PlatformTools`。
 
-### 路線 B：容器內 Linux adb → host 的 adb server
+### 11.3.2 路線 B：容器內 Linux adb → host 的 adb server
 
 讓容器/WSL 內的 **Linux** adb 透過 TCP 連到 Windows 的 adb server，不轉移 USB：
 
@@ -100,7 +114,7 @@ adb.exe -a nodaemon server start          # 監聽 0.0.0.0:5037
 adb devices                                # 看得到同一台手機
 ```
 
-### 路線 C：usbipd-win 把 USB 裝置送進 WSL2
+### 11.3.3 路線 C：usbipd-win 把 USB 裝置送進 WSL2
 
 唯一「真正把 USB 開給 WSL」的做法，會讓 WSL2 出現 `/dev/bus/usb`，容器以 `--device=/dev/bus/usb --privileged` 即可用 **Linux** adb（即 [scripts/deploy-usb.sh](../../scripts/deploy-usb.sh)）。在 **Windows 系統管理員 PowerShell**：
 

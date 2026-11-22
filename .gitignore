@@ -17,3 +17,6 @@ gradle/wrapper/gradle-wrapper.jar
 # local debug screenshots
 cc_*.png
 /*.png
+
+# Python
+__pycache__/

@@ -6,36 +6,47 @@
 
 ## 3.1 業務脈絡
 
-CelloCoach 是一支**自給自足、離線、單一裝置**的 App。沒有後端、沒有網路服務、沒有跨裝置通訊。所有外部互動都發生在裝置本機。
+CelloCoach 是一支**自給自足、單一裝置**的 App。沒有後端、沒有跨裝置通訊；練習流程（收音、偵測、跟譜、計分、校正）完全離線。對外互動只有三個由使用者主動觸發的出入口：從檔案或網址匯入樂譜、把報告分享出去。
 
 ```mermaid
 graph TD
   Student["大提琴學生 <br/> 演奏 ＋ 操作 App"]
+  Teacher["老師"]
   App["CelloCoach Android App"]
   Cello["大提琴 <br/> 聲音"]
-  Mic["裝置麥克風 <br/> （AudioRecord）"]
-  Scores["MusicXML 樂譜 <br/> assets 內建 / .mxl"]
-  Store["裝置儲存 <br/> filesDir/tuning.json"]
+  Mic["裝置麥克風 <br/> AudioRecord"]
+  Assets["內建樂譜 <br/> assets: g_major_scale.musicxml, twinkle.mxl"]
+  Picker["系統檔案選擇器 <br/> OpenDocument"]
+  Web["HTTPS 網址 <br/> .musicxml / .mxl"]
+  Store["裝置儲存 <br/> filesDir: tuning.json, scores/"]
+  Share["系統分享 <br/> ACTION_SEND"]
 
   Student -->|"拉琴"| Cello
   Cello -->|"聲波"| Mic
   Mic -->|"音訊樣本"| App
-  Student -->|"選曲 / 開始 / 看報告"| App
+  Student -->|"選曲 / 匯入 / 開始 / 看報告"| App
   App -->|"五線譜 / 即時回饋 / 報告 / 節拍器"| Student
-  Scores -->|"載入樂譜 bytes"| App
-  App -->|"讀寫校正"| Store
+  Assets -->|"樂譜 bytes"| App
+  Picker -->|"使用者選的檔案"| App
+  Web -->|"使用者輸入的網址"| App
+  App -->|"讀寫校正、匯入曲目"| Store
+  App -->|"report_*.html"| Share
+  Share -->|"Email / 通訊軟體"| Teacher
 ```
 
-### 外部介面（皆在裝置本機）
+### 外部介面
 
 | 外部實體 | 方向 | 介面 | 內容 |
 |---|---|---|---|
-| 學生 | 雙向 | 麥克風 + 觸控螢幕 | 演奏聲音輸入；選曲、開始、校正、看報告 |
-| 大提琴 + 麥克風 | 入 | `AudioRecord`（~20Hz） | PCM 音訊樣本 → 音高偵測 |
-| MusicXML 樂譜 | 入 | App assets（內建 `g_major_scale.musicxml` 等）；支援 `.xml`/`.musicxml`/`.mxl` | 樂譜 bytes，解析為音符 timeline |
-| 裝置檔案系統 | 雙向 | `filesDir/tuning.json` | 四弦校正偏移持久化 |
+| 學生 | 雙向 | 麥克風 + 觸控螢幕 | 演奏聲音輸入；選曲、匯入、練習設定、開始、校正、看報告 |
+| 大提琴 + 麥克風 | 入 | `AudioRecord`（44.1 kHz、每框 2048 樣本 ≈ 21 Hz），需 `RECORD_AUDIO` | PCM 音訊樣本 → 音高偵測；只在校正／練習畫面且前景時開啟 |
+| 內建樂譜 | 入 | App assets（僅 `.musicxml` / `.mxl` 副檔名） | 樂譜 bytes，解析為音符 timeline |
+| 系統檔案選擇器 | 入 | `ActivityResultContracts.OpenDocument` | 使用者挑選的 `.musicxml` / `.mxl` / `.xml` |
+| 網址 | 入 | `HttpURLConnection`（連線 10 s、讀取 15 s、跟隨轉址），需 `INTERNET` | 下載的樂譜 bytes；Android 9+ 預設只允許 HTTPS |
+| 裝置檔案系統 | 雙向 | `filesDir/tuning.json`、`filesDir/scores/`、`cacheDir/reports/` | 四弦校正、匯入的曲目、待分享的報告 |
+| 系統分享 | 出 | `FileProvider`（`${applicationId}.fileprovider`）+ `ACTION_SEND text/html` | 單一 HTML 練習報告 |
 
-**沒有的外部介面**：沒有 HTTP server、沒有瀏覽器、沒有 LAN／雲端連線、沒有 SSE、沒有 `POST /pitch`、沒有外部網路呼叫。
+**沒有的外部介面**：沒有 HTTP server、沒有瀏覽器、沒有 SSE、沒有 `POST /pitch`、沒有任何背景網路呼叫或遙測。網路只在使用者按「從網址匯入」時使用一次。
 
 ## 3.2 技術脈絡：與原始 Web 架構對比
 
@@ -64,7 +75,7 @@ graph TD
     UI["ui：Compose 畫面 + PracticeViewModel"]
     Audio["audio：AudioPitchSource（AudioRecord）"]
     Core["core：ScoreLoader / PitchDetector <br/> ScoreFollower / Scorer / Tuning"]
-    Data["data：TuningStore（filesDir）"]
+    Data["data：TuningStore / ScoreLibrary（filesDir）"]
   end
   Mic["裝置麥克風"]
   Mic --> Audio --> Core --> UI
@@ -83,14 +94,14 @@ graph TD
 | 元件間通訊 | HTTP `POST /pitch` + SSE | 程序內函式呼叫 + 協程 / StateFlow |
 | 樂譜解析 | music21 | `javax.xml` DocumentBuilder（自解 `.mxl` ZIP） |
 | 校正儲存 | `~/.cello-practice/tuning.json` | app `filesDir/tuning.json` |
-| 網路需求 | 需要（LAN/HTTPS 設定） | 無（完全離線） |
-| 麥克風授權 | 瀏覽器安全來源規則 | Android `RECORD_AUDIO` 權限一次 |
+| 網路需求 | 需要（LAN/HTTPS 設定） | 練習不需要；僅「從網址匯入」時使用 |
+| 麥克風授權 | 瀏覽器安全來源規則 | Android `RECORD_AUDIO` 權限；被拒時顯示橫幅可重試 |
 
 ## 3.3 範圍
 
-**範圍內**：MusicXML 載入（含 `.mxl`）、即時音高偵測、DTW 風格單向跟譜、逐音計分與自動診斷、四弦校正與存檔、節拍器 4 拍倒數、原生五線譜與即時回饋 UI、練習報告。
+**範圍內**：MusicXML 載入（含 `.mxl`）與匯入（檔案、HTTPS 網址）、即時音高偵測、DTW 風格單向跟譜、「等正確」逐音模式與慢速練習、逐音計分與自動診斷、四弦校正與存檔、4 拍倒數與可開關的節拍器、原生五線譜與即時回饋 UI、練習報告與 HTML 匯出。
 
-**範圍外**（沿用原版已知限制）：跟譜僅能往前（學生回頭重拉前段不會倒回）；指法對應簡化（高把位一律算最高開弦套校正偏移）；只追蹤第一個 part（不適合多聲部）；無 OMR（只支援已有 MusicXML 的曲目）；校正 JSON 無 schema 版本管理。
+**範圍外**（沿用原版已知限制）：跟譜僅能往前（學生回頭重拉前段不會倒回）；指法對應簡化（高把位一律算最高開弦套校正偏移）；只追蹤第一個 part，且只支援單聲部（多聲部、連結線、裝飾音、反覆記號支援有限，見 [8.1](08_crosscutting_concepts.md#81-樂譜解析-musicxml)）；無 OMR（只支援已有 MusicXML 的曲目）；校正 JSON 無 schema 版本管理；匯入的曲目目前無法在 App 內刪除。
 
 ---
 

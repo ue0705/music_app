@@ -1,6 +1,8 @@
 # CelloCoach 實作契約（給並行開發 agent 的單一事實來源）
 
-本檔定義所有模組的套件、類別與函式簽章。**請嚴格遵守簽章**，否則無法整合編譯。
+本檔定義所有模組的套件、類別與函式簽章。**請嚴格遵守簽章**，否則無法整合編譯；
+簽章改變時要在同一個 commit 更新本檔（見 `.claude/skills/arc42-docs`）。架構說明見
+[docs/arc42](docs/arc42/index.md)。
 原始 Python 參考實作在 `/home/lane/music_code/`（`score_loader.py`, `pitch_detector.py`,
 `score_follower.py`, `scorer.py`, `tuning.py`, `main.py`）。本 Android app 把原本
 「瀏覽器偵測音高→POST 給 Flask」的架構改成**全部在 App 內**進行，移除原 README 中
@@ -65,13 +67,17 @@ class PitchDetector(
     fun detect(samples: FloatArray): Float?
 }
 ```
-做法：normalized square difference function（NSDF）/ autocorrelation，找最高 peak（過 clarityThreshold），用拋物線內插求精確 lag，hz = sampleRate/lag；超出 [fmin,fmax] 回 null。RMS 太低（靜音）回 null。
+做法（McLeod / NSDF）：RMS < 0.01 回 null；從 **lag 0** 算 NSDF 到 maxLag，跳過 lag-0 主瓣後收集 key maxima（只有 `[minLag, maxLag]` 內的 lag 有資格），取第一個 ≥ 0.8 × 最大峰者，拋物線內插求精確 lag 與 clarity；clarity < clarityThreshold 或 hz 超出 [fmin,fmax] 回 null。（從 minLag 開始掃描會把 830 Hz 以上的音判成低八度，見 arc42 §8.2。）
 
 ### `core/ScoreFollower.kt`
 **逐行移植** `score_follower.py`。常數：`ADVANCE_THRESHOLD_TICKS=5`, `LOOKAHEAD=3`, `TIMEOUT_FACTOR=2.5`。
 用注入的 `Clock`（預設 `SystemClock`）取代 `time.monotonic()`（單位秒 = nanos/1e9）。
 ```kotlin
-class ScoreFollower(private val notes: List<ScoreNote>, private val clock: Clock = SystemClock) {
+class ScoreFollower(
+    private val notes: List<ScoreNote>,
+    private val clock: Clock = SystemClock,
+    private val waitForCorrect: Boolean = false,   // 「等正確」模式（Android 新增）
+) {
     fun start()
     fun started(): Boolean
     fun isDone(): Boolean
@@ -81,7 +87,8 @@ class ScoreFollower(private val notes: List<ScoreNote>, private val clock: Clock
     fun observe(detectedMidi: Int?)
 }
 ```
-邏輯完全比照 Python：hard timeout、rest 依時間、重複同音 80% 前進、lookahead 命中需連續 ADVANCE_THRESHOLD_TICKS。
+預設路徑邏輯完全比照 Python：hard timeout、rest 依時間、重複同音 80% 前進、lookahead 命中需連續 ADVANCE_THRESHOLD_TICKS。
+`waitForCorrect = true`：停在目前音，**目前音**連續正確 ADVANCE_THRESHOLD_TICKS 次才前進；無 timeout、無 lookahead；rest 依時間前進。
 
 ### `core/Tuning.kt`
 移植 `tuning.py`。
@@ -130,17 +137,28 @@ fun pitchStatus(detectedHz: Double, expected: ScoreNote, tuning: Tuning): PitchS
 ### `audio/AudioPitchSource.kt`（實機麥克風，不需單元測試）
 ```kotlin
 class AudioPitchSource(private val detector: PitchDetector = PitchDetector()) : PitchSource {
-    override fun start(onFrame: (PitchFrame) -> Unit)   // AudioRecord 背景 thread，~20Hz 讀取 → detect → onFrame
-    override fun stop()
+    override fun start(onFrame: (PitchFrame) -> Unit)   // AudioRecord 背景 thread，每 2048 樣本（≈21Hz）→ detect → onFrame
+    override fun stop()                                  // 冪等；最多等 500ms 讓迴圈結束
 }
 ```
-需處理 RECORD_AUDIO 權限由 UI 層取得；此類別假設已有權限。
+RECORD_AUDIO 權限由 UI 層取得；此類別假設已有權限。**可重複 start/stop**（ViewModel 依畫面啟停）：每次 start 遞增 generation，舊迴圈不會繼續讀或送框。
+
+### `audio/Metronome.kt`
+```kotlin
+class Metronome {
+    fun tick()      // ToneGenerator TONE_PROP_BEEP 40ms
+    fun accent()    // TONE_PROP_BEEP2 60ms（倒數第一拍）
+    fun release()
+}
+```
 
 ### `audio/FakePitchSource.kt`（測試/預覽用）
 ```kotlin
 /** 依腳本回放 PitchFrame，用於 Robolectric/預覽，免真實麥克風。 */
 class FakePitchSource(private val frames: List<PitchFrame> = emptyList()) : PitchSource {
-    fun emit(frame: PitchFrame)            // 手動推一格（測試逐步驅動）
+    var isRunning: Boolean                 // 測試用：斷言麥克風是否開著（private set）
+    fun emit(frame: PitchFrame)            // 手動推一格（測試逐步驅動）；停止時忽略
+    fun emitHz(hz: Float?, rms: Float = 0.2f)
     override fun start(onFrame: (PitchFrame) -> Unit)
     override fun stop()
 }
@@ -156,20 +174,68 @@ class TuningStore(private val dir: java.io.File) {
 }
 ```
 
-## UI 行為（com.cellocoach.ui）
-- `MainActivity` setContent → `CelloCoachApp(pitchSource)`，預設用 `AudioPitchSource`；測試可注入 `FakePitchSource`。
+### `data/ScoreLibrary.kt`
+匯入的樂譜，存 app `filesDir/scores/`。同名時優先於內建 assets。
+```kotlin
+class ScoreLibrary(private val dir: java.io.File) {
+    fun list(): List<String>                     // .musicxml/.mxl/.xml，排序
+    fun exists(name: String): Boolean
+    fun read(name: String): ByteArray?
+    fun save(rawName: String, bytes: ByteArray): String   // 回傳存檔名（已 sanitize）
+    fun delete(name: String): Boolean
+    fun sanitize(rawName: String): String        // 取最後一段、去 ?/#、非 [\w.-] → _、補 .musicxml
+}
+```
+
+### `core/ReportHtml.kt`
+```kotlin
+object ReportHtml {
+    fun build(summary: PracticeSummary, scoreName: String, generatedAt: String): String  // 單一自含 HTML，字串皆 escape
+    fun midiName(midi: Int): String                                                     // 57 -> "A3"
+}
+```
+
+## UI 行為 (com.cellocoach.ui)
+- `MainActivity`：`setContent { CelloCoachApp(viewModel, onRequestMicPermission = ::requestMicPermission) }`，預設 `AudioPitchSource`。
+  - onCreate / onResume / 權限結果 → `viewModel.onMicPermissionChanged(granted)`；首次啟動未授權時請求權限。
+  - onStart → `onForegroundChanged(true)`；onStop（非 `isChangingConfigurations`）→ `onForegroundChanged(false)`。
+  - 橫幅的重試：系統仍會詢問就再請求，否則開 `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`。
+- `CelloCoachApp(vm: PracticeViewModel, onRequestMicPermission: () -> Unit = {})`：頂欄、`vm.micPermissionDenied` 時的權限橫幅、依 `vm.screen` 切換四畫面。
 - 畫面（單一 Activity + Compose 狀態切換，無需 Navigation 套件）：
   1. **Home**：選曲（assets 內 `g_major_scale.musicxml` 等）、顯示已存校正狀態、「開始練習」。
   2. **Tuning**：依序 C→G→D→A，顯示目前目標弦、即時 cents、進度條（30 tick）；可「略過」。完成存檔。
   3. **Practice**：原生 Compose 五線譜 `ScoreView`（畫五線譜、音符、隨演奏移動的游標、目前音 good/close/off/wrong 上色）、即時面板（應拉 vs 你拉、cents、status 顏色）、節拍器 4 拍倒數、開始前倒數。
   4. **Report**：總分、對音 X/Y、平均 cents、每顆音明細清單、診斷。
-- `PracticeViewModel`：持有 ScoreFollower + Scorer + Tuning，訂閱 PitchSource，50ms tick 邏輯比照 `main.py` 的 `_practice_tick_loop` 與 `_calibration_tick_loop`。狀態以 Compose `State`/`StateFlow` 暴露。
-- **測試掛勾**：所有可測元件加 `Modifier.testTag(...)`，tag 命名集中放 `ui/TestTags.kt`（例：`home_start`, `tuning_skip`, `practice_cursor`, `report_score`...）。
+- `PracticeViewModel`：持有 ScoreFollower + Scorer + Tuning，訂閱 PitchSource，50ms tick 邏輯比照 `main.py` 的 `_practice_tick_loop` 與 `_calibration_tick_loop`。狀態以 Compose `mutableStateOf` 暴露。
+  ```kotlin
+  class PracticeViewModel(
+      app: Application,
+      pitchSource: PitchSource,
+      tuningStore: TuningStore = TuningStore(app.filesDir),
+      scoreLibrary: ScoreLibrary = ScoreLibrary(File(app.filesDir, "scores")),
+      clock: Clock = SystemClock,          // 測試注入假時鐘
+      autoDrive: Boolean = true,           // 測試設 false，改用 stepForTest()
+  ) : AndroidViewModel(app) {
+      // 導覽：Screen { HOME, TUNING, PRACTICE, REPORT }
+      fun selectScore(name: String); fun onStartPressed(); fun beginCalibration(); fun skipCalibration()
+      fun goToPractice(); fun resetPractice(); fun goHome()
+      fun setPracticeTempo(factor: Double); fun setPracticeMode(wait: Boolean, factor: Double = 1.0); fun toggleMetronome()
+      fun onMicPermissionChanged(granted: Boolean); fun onForegroundChanged(foreground: Boolean)
+      fun importScore(displayName: String, bytes: ByteArray); fun importFromUrl(url: String); fun clearImportStatus()
+      fun buildReportFile(): File?
+      internal fun stepForTest()
+      companion object { const val TICK_MS = 50L; const val CALIB_REQUIRED_TICKS = 30; fun factory(app, source) }
+  }
+  ```
+  - 麥克風：`syncMic()` 在每次狀態改變時重算「有權限 ∧ 前景 ∧ 畫面為 TUNING/PRACTICE」決定 start/stop；背景中的練習會重設，回前景重新倒數。
+  - 校正：`beginCalibration` 寫入新的 `Tuning`；四弦完成才存檔並取代已存校正；`skipCalibration` 只影響當次；`goHome` 恢復已存校正。
+- **測試掛勾**：所有可測元件加 `Modifier.testTag(...)`，tag 命名集中放 `ui/TestTags.kt`（例：`home_start`, `tuning_skip`, `practice_cursor`, `report_score`, `mic_permission_banner`, `mic_permission_request`...），並開啟 `testTagsAsResourceId`。
 
 ## 測試
 - 單元測試（`app/src/test`，JVM）：core 各模組。
-- Robolectric Compose UI 測試（`app/src/test`，`@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`）：注入 `FakePitchSource` 餵腳本音高，驗證：校正流程、練習游標前進、回饋顏色、報告數字。**這是「mock 錄音」的 e2e 螢幕驗證**，可在 devcontainer 內免 emulator 執行。
-- Instrumented（`app/src/androidTest`）：一支煙霧測試，於真機/emulator 啟動 App 驗證主畫面（透過 USB 部署）。
+- Robolectric Compose UI 測試（`app/src/test`，`@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`）：注入 `FakePitchSource` 餵腳本音高，驗證：校正流程、練習游標前進、回饋顏色、報告數字；`SessionLifecycleTest` 驗證麥克風只在 Tuning/Practice 開、背景重來、權限橫幅、略過／中途離開保留已存校正。**這是「mock 錄音」的 e2e 螢幕驗證**，可在 devcontainer 內免 emulator 執行。
+- Instrumented（`app/src/androidTest`）：一支煙霧測試，於 emulator 啟動 App 驗證主畫面（HyperOS 實機會擋 instrumentation 啟動 Activity）。
+- 實機驗證：`scripts/deploy-macos.sh` 安裝、`scripts/phone.sh` 操作與讀狀態，流程見 `.claude/skills/device-verify/SKILL.md`。
 
 ## 樣式/相依
 - Material3、Compose BOM 已設定。主題 `Theme.CelloCoach`。
