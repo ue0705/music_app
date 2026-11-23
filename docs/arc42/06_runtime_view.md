@@ -27,6 +27,7 @@ sequenceDiagram
     VM->>SF: "observe(detectedMidi)"
     SF-->>VM: "currentNoteIdx() / expectedNote()"
     VM->>SC: "observe(currentNoteIdx, hz)"
+    VM->>VM: "RhythmChecker.observe(elapsed, currentNoteIdx, detectedMidi) → rhythmWarning（非等正確模式）"
     VM->>VM: "pitchStatus(hz, expected, tuning)"
     VM-->>UI: "更新 Compose state（游標、應拉 vs 你拉、cents、status 顏色）"
   end
@@ -35,6 +36,7 @@ sequenceDiagram
 要點：
 - 順序固定為 **先 `follower.observe` 再 `scorer.observe`**，因 Scorer 要用 follower 剛更新的 `currentNoteIdx()` 決定樣本歸到哪顆音（對齊 `_practice_tick_loop`）。
 - 即使該 tick 沒偵測到音高也要呼叫 `follower.observe(null)`，讓 hard timeout 能把卡住的音推進（見 [8.4](08_crosscutting_concepts.md#84-跟譜遲滯-hysteresis-與前進邏輯)）。「等正確」模式沒有 timeout，會一直停在該音。
+- 節奏判定排在 follower 之後，用的是 follower 剛更新的目前音（見 [8.4](08_crosscutting_concepts.md#84-跟譜遲滯-hysteresis-與前進邏輯) 節奏判定）。
 - ViewModel 是 follower／scorer 的唯一寫者；Compose 端只讀。
 
 ## 6.2 情境二：校正 (Calibration) 迴圈
@@ -93,7 +95,7 @@ sequenceDiagram
   UI->>VM: "goToPractice()"
   VM->>VM: "resetEngine()：依 practiceBpm / bpm 縮放 timeline、依 waitMode 建 follower 與 scorer"
   VM->>MIC: "show(PRACTICE) → syncMic() → start()"
-  VM->>VM: "4 拍倒數（beatMs ＝ 60000 / practiceBpm，節拍器開時發聲）"
+  VM->>VM: "一小節倒數（依樂譜拍號；拍長 ＝ 60000 × 4/beat-type / practiceBpm，節拍器開時發聲）"
   VM->>SF: "start()"
   loop "每 50 ms 直到 isDone()"
     VM->>SF: "observe(detectedMidi)"
@@ -108,6 +110,8 @@ sequenceDiagram
 
 要點：
 - 倒數畫面一定會顯示；節拍器聲音只在「節拍器」開關打開時才響，且「等正確」模式不播持續拍點。
+- 持續拍點依樂譜的拍點表（`engineBeats()`）排程：每小節第一拍加重音，遇到曲中變速跟著變；畫面同步顯示「第幾小節・第幾拍」與目前速度。
+- 節奏警示在出錯的那個 tick 出現，`RHYTHM_WARNING_HOLD_SEC`（1.5 秒）沒有新錯誤就消失；結束時搶拍／拖拍的音號加進報告診斷。
 - `summary()` 在 `isDone()` 第一次成立時快照一次（對齊 Python `last_summary`），避免報告數字在重組間漂動。
 - Practice 畫面的「重新開始」呼叫 `resetPractice()`：重建 follower 與 scorer 並重新倒數（對齊 `/reset`）。
 

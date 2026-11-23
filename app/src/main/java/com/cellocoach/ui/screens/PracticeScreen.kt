@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cellocoach.core.PitchStatus
+import com.cellocoach.core.RhythmIssue
 import com.cellocoach.ui.FeedbackColors
 import com.cellocoach.ui.PracticeViewModel
 import com.cellocoach.ui.ScoreView
@@ -56,7 +57,10 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = "♩ = ${vm.practiceBpm.roundToInt()}" + if (vm.waitMode) "・等正確" else "",
+                    // Tempo follows the score: shows the tempo in force at the
+                    // current note (tempo changes included), at the practice speed.
+                    text = "♩ = ${(if (vm.started) vm.currentBpm else vm.practiceBpm).roundToInt()}" +
+                        "・${vm.timeSignature}" + if (vm.waitMode) "・等正確" else "",
                     modifier = Modifier.testTag(TestTags.PRACTICE_TEMPO),
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -68,6 +72,8 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                 status = vm.status,
                 bpm = vm.bpm,
             )
+
+            RhythmBanner(vm)
 
             FeedbackPanel(vm)
 
@@ -98,6 +104,42 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Beat position in the score's meter plus the live rhythm warning. The warning
+ * appears the moment a note comes in early / late (or is held too long) and
+ * clears by itself shortly after.
+ */
+@Composable
+private fun RhythmBanner(vm: PracticeViewModel) {
+    if (!vm.waitMode && vm.measureNo > 0) {
+        Text(
+            text = "第 ${vm.measureNo} 小節・第 ${vm.beatNo} 拍" + if (vm.beatNo == 1) " ●" else "",
+            modifier = Modifier.testTag(TestTags.PRACTICE_BEAT),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+    val warning = vm.rhythmWarning ?: return
+    val text = when (warning) {
+        RhythmIssue.RUSHING -> "⚠ 節奏太快（搶拍），跟著拍子穩住！"
+        RhythmIssue.DRAGGING -> "⚠ 節奏太慢（拖拍），要跟上拍子！"
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(FeedbackColors.wrong)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text,
+            modifier = Modifier.testTag(TestTags.PRACTICE_RHYTHM_WARNING),
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }
 

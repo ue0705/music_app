@@ -119,6 +119,6 @@ class TempoControlTest {
         composeTestRule.runOnIdle { vm.goToPractice() }
         composeTestRule.waitForIdle()
         assertEquals(Screen.PRACTICE, vm.screen)
-        composeTestRule.onNodeWithTag(TestTags.PRACTICE_TEMPO).assertTextEquals("♩ = 50")
+        composeTestRule.onNodeWithTag(TestTags.PRACTICE_TEMPO).assertTextEquals("♩ = 50・4/4")
     }
 }

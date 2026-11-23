@@ -59,6 +59,8 @@ object TestTags {
     const val PRACTICE_SCORE_VIEW = "practice_score_view"
     const val PRACTICE_RESET = "practice_reset"
     const val PRACTICE_TEMPO = "practice_tempo"
+    const val PRACTICE_BEAT = "practice_beat"
+    const val PRACTICE_RHYTHM_WARNING = "practice_rhythm_warning"
 
     // ---- Report ------------------------------------------------------------
     const val REPORT_SCORE = "report_score"

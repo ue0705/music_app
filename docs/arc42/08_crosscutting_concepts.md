@@ -10,12 +10,14 @@
 
 - **容器偵測**：`bytes[0]=='P' && bytes[1]=='K'` → 視為 `.mxl` ZIP，讀 `META-INF/container.xml` 的 rootfile full-path 取主譜；否則取第一個非 META-INF 的 `.xml/.musicxml`。純 XML 則直接解析。
 - **離線解析**：關閉外部 DTD 載入，`EntityResolver` 一律回空內容，MusicXML 的 DTD 宣告不會觸發網路存取。
-- **tempo 優先序**：`bpmOverride` > 第一個 `<sound tempo>`／`<metronome>`（beat-unit + per-minute） > 預設 120。`secPerQuarter = 60 / bpm`。
+- **tempo 優先序**：`bpmOverride` > 第一個 `<sound tempo>`／`<metronome>`（beat-unit + 附點 + per-minute） > 預設 120，即開頭速度 `bpm`。
+- **曲中變速**（v1.0.10）：第一個 part 內位置 > 0 的 `<sound tempo>`／`<direction>` 的 `<metronome>` 建成速度表 `tempos`；音符先以 quarter 計，最後依速度表分段換成秒（單一速度時與 Python 完全相同）。
+- **拍號與拍點**：`<attributes><time>` 決定每小節拍數與拍長（`4/beat-type` quarter，6/8 → 6 個八分拍）；每小節依實際長度產生 `Beat(time, measure, beat)`，第一小節不足一小節時視為弱起、拍號靠右對齊。沒有 `<time>` 時當作 4/4。
 - **時間累積**：逐 measure，依 `<attributes><divisions>` 把 `<duration>/divisions` 換成 quarterLength。`<note>` 前進游標、`<backup>` 後退、`<forward>` 前進。
 - **MIDI 換算**：`midi = (octave+1)*12 + stepSemitone[step] + alter`，`stepSemitone = C0 D2 E4 F5 G7 A9 B11`；name 用 `"$step$octave"`（有 alter 加 #/b）。
 - **和弦**：含 `<chord/>` 者與前一個音同起點、取最高音、不前進游標。
 - **rest**：`midi = REST(-1)`、`name="rest"`，**保留在 timeline**（與 Python 對齊）。
-- 每音 `start = 游標(quarter) × secPerQuarter`，`end = start + quarterLength × secPerQuarter`。
+- 每音 `start = seconds(游標 quarter)`，`end = seconds(游標 + quarterLength)`；`seconds()` 依速度表分段累加 `60 / bpm`。
 
 已知限制（單聲部教材沒問題，匯入的複雜樂譜可能出錯；見 [11.2](11_risks_and_technical_debt.md#112-技術債)）：
 
@@ -130,7 +132,21 @@ graph TD
 | 模式 | 作法 | 效果 |
 |---|---|---|
 | 自選速度（♩ = `practiceBpm`，30–240） | 首頁以 − / + （±1）與滑桿設定，取整數；載入曲目時重設為樂譜原速 `bpm`。`tempoFactor = practiceBpm / bpm`，`engineNotes()` 把每顆音的 `start/end` 除以它後交給 follower 與 scorer；倒數拍長 `beatMs = 60000 / practiceBpm`（下限 120 ms） | 逾時、休止、80% 規則全部跟著所選速度縮放（可慢也可快）；五線譜顯示不變；練習畫面右上顯示「♩ = N」 |
+| 節拍與速度跟著樂譜（v1.0.10） | 倒數一小節（拍號拍數；1–2 拍的拍號數兩小節）；持續拍點依 `engineBeats()`（拍點 ÷ `tempoFactor`）排程、重拍加重音；`currentBpm` = 目前音所在速度 × `tempoFactor` | 3/4、6/8、曲中變速都照樂譜；練習畫面顯示「♩ = N・拍號」與「第 m 小節・第 b 拍」 |
 | 等正確（`waitForCorrect = true`） | 獨立開關，可搭配任何速度。停在目前音；**目前音**連續正確 5 tick 才前進；沒有 timeout 與 lookahead；休止依（縮放後的）時間前進；不播持續拍點 | 逐音慢練；沒拉對就一直停著 |
+
+**節奏判定**（`core/RhythmChecker`，Android 新增，等正確模式不判定）：
+
+| 規則 | 作法 |
+|---|---|
+| onset | 跟譜器目前音的音高連續出現 ≥ `ONSET_TICKS`（3）tick，onset 時間取這段音高的起點；同音反覆要中間有無聲（換弓）才算 |
+| 比較間隔而非絕對時間 | 偏差 = （這次 onset − 上次 onset）−（譜上兩音 start 差，已依練習速度縮放）；起拍晚了只影響第一音，不會整首都判錯 |
+| 容許誤差 | `max(MIN_TOLERANCE_SEC = 0.15 s, RELATIVE_TOLERANCE = 0.3 × 譜上間隔)` |
+| 搶拍／拖拍 | 偏差 < −容許 → `RUSHING`；> 容許 → `DRAGGING` |
+| 即時拖拍 | 還拉著前一音（或無聲）而下一個不同音已逾時 → 當下就判 `DRAGGING`，不必等學生拉到下一音 |
+| 不重複、不誤判錯音 | 每顆音最多報一次；拉成別的音高不算節奏錯（交給音準回饋） |
+
+警示在練習畫面以紅色橫幅顯示 1.5 秒（`RHYTHM_WARNING_HOLD_SEC`），結束時把搶拍／拖拍的音號寫進報告診斷。
 
 ## 8.5 調音偏移模型
 

@@ -72,9 +72,11 @@ graph TD
 ```mermaid
 graph LR
   BYTES["MusicXML bytes <br/> .xml / .musicxml / .mxl"] --> SL["ScoreLoader.load()"]
-  SL --> LS["LoadedScore <br/> notes + bpm"]
+  SL --> LS["LoadedScore <br/> notes + bpm + beats + tempos"]
   LS --> SF["ScoreFollower"]
   LS --> SC["Scorer"]
+  LS --> RC["RhythmChecker"]
+  HZ --> RC
   SAMP["FloatArray 音框"] --> PD["PitchDetector.detect()"]
   PD --> HZ["Hz 或 null"]
   HZ --> SF
@@ -90,7 +92,7 @@ graph LR
 - 移植 `score_loader.py`，但**禁用 music21**；以 JDK `javax.xml`（`DocumentBuilder`）自行解析 MusicXML，關閉外部 DTD 載入。
 - 自動偵測 ZIP magic bytes（`"PK"`），解壓並從 `META-INF/container.xml` 的 rootfile 取主譜 XML。
 - 只取第一個 part，逐 measure 累積時間；rests 也保留在 timeline。
-- tempo 優先序：`bpmOverride` > 樂譜 `<sound tempo>`／`<metronome>` > 預設 120。
+- tempo 優先序：`bpmOverride` > 樂譜 `<sound tempo>`／`<metronome>` > 預設 120。曲中變速建成速度表 `tempos`，音符時間依速度表換算；依 `<time>` 拍號產生拍點 `beats`（v1.0.10）。
 - 解析細節與已知限制見 [8.1](08_crosscutting_concepts.md#81-樂譜解析-musicxml)。
 
 ### 5.2.2 PitchDetector
@@ -122,6 +124,11 @@ graph LR
 
 - 簽章：`object ReportHtml { fun build(summary: PracticeSummary, scoreName: String, generatedAt: String): String; fun midiName(midi: Int): String }`
 - 把 `PracticeSummary` 產生成**單一、自含 CSS** 的 HTML（總分卡片、診斷、逐音表格與狀態色塊），供老師離線開啟或列印。所有外部字串都經 HTML escape。
+
+### 5.2.7 RhythmChecker（Android 新增）
+
+- 簽章：`class RhythmChecker(notes: List<ScoreNote>) { fun observe(now: Double, currentIdx: Int, detectedMidi: Int?): RhythmEvent?; val events; fun count(issue) }`
+- 每 tick 找出目前音的 onset，比較兩個 onset 的間隔與譜上間隔，判定 `RUSHING`／`DRAGGING`；前一音拉太久時不等下一音就先判 `DRAGGING`。純 Kotlin，JVM 可測。規則見 [8.4](08_crosscutting_concepts.md#84-跟譜遲滯-hysteresis-與前進邏輯)。
 
 ## 5.3 Level 2 — audio 音訊層
 

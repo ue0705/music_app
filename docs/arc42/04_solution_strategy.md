@@ -34,7 +34,8 @@
 | 自動診斷（重複錯音/系統性偏移/整體偏高低） | G3 | `core/Scorer`（`diagnostics` 產生繁中字串） | `core/Tuning`、`core/stringForMidi` | `scorer.py` + README 診斷規則 |
 | 調音校正（拉四條空弦 C→G→D→A） | G4 | `core/Tuning`（`calibrateString`/`offsetCentsForMidi`/`nextUncalibrated`）+ `ui/Tuning` 畫面 | `audio/AudioPitchSource`、`core/PitchDetector` | `tuning.py` |
 | 校正存檔（下次自動套用） | G4 | `data/TuningStore`（`filesDir/tuning.json`，含 `savedAt`） | `core/Tuning` | `tuning.py` save/load（路徑改 `filesDir`）|
-| 節拍器倒數（開始前 4 拍，依 BPM） | G6 | `ui/PracticeViewModel`（`countdown` 狀態、`startCountdown`）+ `audio/Metronome`（`ToneGenerator`，可開關） | `core/LoadedScore.bpm` | `main.py` tick loops |
+| 節拍器倒數與拍點（依樂譜拍號一小節倒數；拍點跟著拍號重拍與曲中變速） | G6 | `ui/PracticeViewModel`（`countdown`、`startCountdown`、`startMetronomeBeats` 依 `engineBeats()` 排程、`measureNo`/`beatNo`/`currentBpm`）+ `audio/Metronome`（`ToneGenerator`，可開關） | `core/LoadedScore`（`beats`/`tempos`/`timeSignature`） | `main.py` tick loops（拍號／變速為 Android 新增） |
+| 節奏錯誤即時警示（搶拍／拖拍） | G12 | `core/RhythmChecker` + `PracticeViewModel.checkRhythm`（`rhythmWarning`）+ `PracticeScreen` 紅色橫幅；報告診斷列出出錯的音 | `core/ScoreFollower`（目前音） | 無（Android 新增） |
 | 移除 HTTPS/LAN 連線痛點 | G7 | 整體架構（單一 App，無 server） | — | 取代 Flask + SSE + `--ssl` |
 | 匯入樂譜（檔案 / 網址） | G8 | `ui/screens/HomeScreen`（檔案選擇器、網址對話框）+ `PracticeViewModel.importScore` / `importFromUrl` | `data/ScoreLibrary`（`filesDir/scores`）、`core/ScoreLoader`（先解析驗證） | 無（Android 新增） |
 | 節拍器式練習速度（♩ = 30–240）與等正確開關 | G9 | `PracticeViewModel.changePracticeBpm` / `adjustPracticeBpm` / `resetPracticeBpm` / `changeWaitMode`（`engineNotes()` 縮放 timeline、`beatMs()` 依所選速度倒數） | `core/ScoreFollower` | 無（Android 新增） |

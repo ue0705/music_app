@@ -86,6 +86,19 @@ Android 版新增的練習模式：游標停在目前音，直到**這顆音**�
 載入曲目時預設為樂譜原速；引擎時間軸依 `practiceBpm / bpm` 縮放。見
 `PracticeViewModel.practiceBpm`、[8.4](08_crosscutting_concepts.md#84-跟譜遲滯-hysteresis-與前進邏輯)。
 
+### 拍號與拍點 (time signature / beat)
+
+樂譜 `<time>` 的「每小節幾拍、以幾分音符為一拍」（例如 3/4）。CelloCoach 依它產生拍點表：
+倒數一小節、節拍器在每小節第一拍（重拍）加重音、練習畫面顯示「第幾小節・第幾拍」。曲中變速
+也會反映在拍點時間上。見 `core/ScoreLoader.kt` 的 `Beat`、`TempoMark`、
+[8.1](08_crosscutting_concepts.md#81-樂譜解析-musicxml)。
+
+### 搶拍 / 拖拍 (rushing / dragging)
+
+節奏錯誤的兩種方向：音比譜上該出現的時間**早**進來是搶拍（太快），**晚**進來或前一音拉太久是拖拍
+（太慢）。CelloCoach 比較相鄰兩音實際起音的間隔與譜上間隔，超出容許誤差就在練習畫面即時警示。
+見 `core/RhythmChecker.kt`、[ADR-007](09_architecture_decisions.md#adr-007-節奏判定比較-onset-間隔-在-follower-之外)。
+
 ## 技術名詞 (演算法 / 工具 / 環境)
 
 ### 音高偵測 (pitch detection)

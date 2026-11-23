@@ -20,6 +20,11 @@ import com.cellocoach.core.Scorer
 import com.cellocoach.core.SystemClock
 import com.cellocoach.core.Tuning
 import com.cellocoach.core.PracticeSummary
+import com.cellocoach.core.Beat
+import com.cellocoach.core.RhythmChecker
+import com.cellocoach.core.RhythmIssue
+import com.cellocoach.core.TempoMark
+import com.cellocoach.core.TimeSignature
 import com.cellocoach.core.nominalHzForString
 import com.cellocoach.core.pitchStatus
 import com.cellocoach.core.ReportHtml
@@ -138,6 +143,14 @@ class PracticeViewModel(
     private var notes: List<ScoreNote> = emptyList()
     val totalNotes: Int get() = notes.size
 
+    /** The score's metronome grid and tempo map (seconds at the score tempo). */
+    private var beats: List<Beat> = emptyList()
+    private var tempos: List<TempoMark> = emptyList()
+
+    /** Time signature of the score's first measure (drives the count-in and beat display). */
+    var timeSignature by mutableStateOf(TimeSignature(4, 4))
+        private set
+
     // ---- Engine ------------------------------------------------------------
     private var follower: ScoreFollower? = null
     private var scorer: Scorer? = null
@@ -192,9 +205,30 @@ class PracticeViewModel(
     var status by mutableStateOf<PitchStatus?>(null)
         private set
 
-    /** Metronome countdown: 4..1 before the score starts, 0 = running. */
+    /** Metronome countdown: one bar (n..1) before the score starts, 0 = running. */
     var countdown by mutableStateOf(0)
         private set
+
+    /** Where the score's beat grid is now (follows the score's time signature and
+     *  tempo changes at the practice tempo); 0 before start / in wait mode. */
+    var measureNo by mutableStateOf(0)
+        private set
+    var beatNo by mutableStateOf(0)
+        private set
+
+    /** Current tempo ♩ = N at the practice speed — follows tempo changes in the score. */
+    var currentBpm by mutableStateOf(120.0)
+        private set
+
+    /** Live rhythm warning (cleared [RHYTHM_WARNING_HOLD_SEC] after the last mistake). */
+    var rhythmWarning by mutableStateOf<RhythmIssue?>(null)
+        private set
+    var rushCount by mutableStateOf(0)
+        private set
+    var dragCount by mutableStateOf(0)
+        private set
+    private var rhythm: RhythmChecker? = null
+    private var rhythmWarningAt = 0.0
 
     // ---- Report ------------------------------------------------------------
     var summary by mutableStateOf<PracticeSummary?>(null)
@@ -233,8 +267,18 @@ class PracticeViewModel(
         else notes.map { it.copy(start = it.start / f, end = it.end / f) }
     }
 
-    /** Metronome beat (one quarter note) at the chosen practice tempo. */
-    private fun beatMs(): Long = (60_000.0 / practiceBpm).toLong().coerceAtLeast(120L)
+    /** Beat grid rescaled to the practice tempo, like [engineNotes]. */
+    private fun engineBeats(): List<Beat> {
+        val f = tempoFactor
+        return beats.map { it.copy(time = it.time / f) }
+    }
+
+    /** One beat of the first measure's time signature at the chosen practice tempo. */
+    private fun beatMs(): Long =
+        (60_000.0 * timeSignature.beatQuarters / practiceBpm).toLong().coerceAtLeast(120L)
+
+    /** Count-in length: one bar of the score's meter (two bars for 1- or 2-beat meters). */
+    private fun countInBeats(): Int = timeSignature.beats.let { if (it <= 2) it * 2 else it }.coerceAtMost(12)
 
     init {
         loadSavedTuning()
@@ -434,11 +478,13 @@ class PracticeViewModel(
         }
         beatJob?.cancel()
         countdownJob = viewModelScope.launch {
-            // 4-beat metronome lead-in at the (possibly slowed) tempo.
+            // One-bar metronome lead-in in the score's meter at the practice tempo.
             val beat = beatMs()
-            for (b in 4 downTo 1) {
+            val n = countInBeats()
+            val perBar = timeSignature.beats
+            for (b in n downTo 1) {
                 countdown = b
-                if (metronomeOn) { if (b == 4) metronome.accent() else metronome.tick() }
+                if (metronomeOn) { if ((n - b) % perBar == 0) metronome.accent() else metronome.tick() }
                 delay(beat)
             }
             countdown = 0
@@ -451,14 +497,26 @@ class PracticeViewModel(
         }
     }
 
-    /** Ongoing on-beat metronome during practice (only while [metronomeOn]). */
+    /**
+     * Ongoing metronome during practice (only while [metronomeOn]). Clicks on the
+     * score's own beat grid — accent on each bar's first beat, following time
+     * signature and tempo changes — at the practice tempo.
+     */
     private fun startMetronomeBeats() {
         beatJob?.cancel()
+        val grid = engineBeats()
         beatJob = viewModelScope.launch {
-            val beat = beatMs()
-            while (started && !done) {
-                metronome.tick()
-                delay(beat)
+            if (grid.isEmpty()) {
+                val beat = beatMs()
+                while (started && !done) { metronome.tick(); delay(beat) }
+                return@launch
+            }
+            val t0 = clock.nowNanos()
+            for (b in grid) {
+                val waitMs = (b.time * 1000.0 - (clock.nowNanos() - t0) / 1e6).toLong()
+                if (waitMs > 0) delay(waitMs)
+                if (!started || done) break
+                if (b.isDownbeat) metronome.accent() else metronome.tick()
             }
         }
     }
@@ -480,7 +538,31 @@ class PracticeViewModel(
         val detMidi = hz?.let { (69.0 + 12.0 * log2(it / A4_HZ)).roundToInt() }
         f.observe(detMidi)
         s.observe(f.currentNoteIdx(), hz)
+        if (!waitMode) checkRhythm(f.elapsed(), f.currentNoteIdx(), detMidi)
         refreshPracticeState()
+    }
+
+    /** Feed the rhythm judge and raise / clear the live warning. */
+    private fun checkRhythm(now: Double, idx: Int, detMidi: Int?) {
+        val r = rhythm ?: return
+        val ev = r.observe(now, idx, detMidi)
+        if (ev != null) {
+            rhythmWarning = ev.issue
+            rhythmWarningAt = now
+            rushCount = r.count(RhythmIssue.RUSHING)
+            dragCount = r.count(RhythmIssue.DRAGGING)
+        } else if (rhythmWarning != null && now - rhythmWarningAt > RHYTHM_WARNING_HOLD_SEC) {
+            rhythmWarning = null
+        }
+    }
+
+    /** Bar / beat and current tempo at [elapsed] seconds into the (rescaled) score. */
+    private fun refreshBeatPosition(f: ScoreFollower) {
+        if (!f.started() || waitMode) { measureNo = 0; beatNo = 0; return }
+        val t = f.elapsed() * tempoFactor // back to score seconds
+        val b = beats.lastOrNull { it.time <= t + 1e-9 }
+        measureNo = b?.measure ?: 0
+        beatNo = b?.beat ?: 0
     }
 
     /** Recompute all the realtime Compose state from the engine (port of the SSE payload build). */
@@ -493,6 +575,10 @@ class PracticeViewModel(
         expectedName = exp?.name
         expectedHz = if (exp != null && exp.midi >= 0) exp.freq.roundTo(2) else null
         expectedIsRest = exp?.isRest == true
+        refreshBeatPosition(f)
+        // Tempo follows the score: the tempo mark in force at the current note.
+        val scoreT = exp?.start?.times(tempoFactor) ?: 0.0
+        currentBpm = ((tempos.lastOrNull { it.time <= scoreT + 1e-9 }?.bpm ?: bpm) * tempoFactor)
 
         val frame = latestFrame
         val hz = frame.hz?.takeIf { it > 0f }?.toDouble()
@@ -512,7 +598,7 @@ class PracticeViewModel(
 
         // On the first done tick, snapshot the summary and jump to the report.
         if (f.isDone() && summary == null) {
-            summary = scorer?.summary()
+            summary = scorer?.summary()?.let { withRhythm(it) }
             show(Screen.REPORT)
         }
     }
@@ -590,6 +676,9 @@ class PracticeViewModel(
         val loaded = runCatching { ScoreLoader.load(bytes) }.getOrNull() ?: return
         notes = loaded.notes
         bpm = loaded.bpm
+        beats = loaded.beats
+        tempos = loaded.tempos
+        timeSignature = loaded.timeSignature
         // A new score starts at its own tempo (still within the selectable range).
         practiceBpm = loaded.bpm.coerceIn(MIN_PRACTICE_BPM, MAX_PRACTICE_BPM).roundToInt().toDouble()
         resetEngine()
@@ -599,6 +688,13 @@ class PracticeViewModel(
         val en = engineNotes()
         follower = ScoreFollower(en, clock, waitForCorrect = waitMode)
         scorer = Scorer(en, tuning)
+        rhythm = RhythmChecker(en)
+        rhythmWarning = null
+        rushCount = 0
+        dragCount = 0
+        measureNo = 0
+        beatNo = 0
+        currentBpm = practiceBpm
         summary = null
         started = false
         done = false
@@ -611,6 +707,20 @@ class PracticeViewModel(
         expectedName = null
         expectedHz = null
         expectedIsRest = false
+    }
+
+    /** Add the rhythm results to the report's diagnostics (not in wait mode). */
+    private fun withRhythm(s: PracticeSummary): PracticeSummary {
+        val r = rhythm ?: return s
+        if (waitMode) return s
+        val rush = r.events.filter { it.issue == RhythmIssue.RUSHING }.map { it.noteIdx + 1 }
+        val drag = r.events.filter { it.issue == RhythmIssue.DRAGGING }.map { it.noteIdx + 1 }
+        if (rush.isEmpty() && drag.isEmpty()) return s
+        val lines = buildList {
+            if (rush.isNotEmpty()) add("節奏：搶拍（太快）${rush.size} 次，第 ${rush.joinToString("、")} 音。")
+            if (drag.isNotEmpty()) add("節奏：拖拍（太慢）${drag.size} 次，第 ${drag.joinToString("、")} 音。")
+        }
+        return s.copy(diagnostics = s.diagnostics + lines)
     }
 
     private fun rebuildScorer() {
@@ -723,6 +833,9 @@ class PracticeViewModel(
         /** Selectable practice tempo range, ♩ = 30..240 (a typical metronome's span). */
         const val MIN_PRACTICE_BPM = 30.0
         const val MAX_PRACTICE_BPM = 240.0
+
+        /** How long the rhythm warning banner stays up after a mistake (seconds). */
+        const val RHYTHM_WARNING_HOLD_SEC = 1.5
 
         private const val DEFAULT_SCORE = "g_major_scale.musicxml"
 

@@ -40,7 +40,15 @@ val SystemClock: Clock
 ### `core/ScoreLoader.kt`
 移植 `score_loader.py`。**不可用 music21**；以 JDK `javax.xml`(DocumentBuilder) 自己解析 MusicXML。
 ```kotlin
-data class LoadedScore(val notes: List<ScoreNote>, val bpm: Double)
+data class LoadedScore(
+    val notes: List<ScoreNote>, val bpm: Double,                 // bpm = 開頭速度（quarter BPM）
+    val beats: List<Beat> = emptyList(),                         // 依拍號產生的拍點（秒，樂譜速度）
+    val tempos: List<TempoMark> = listOf(TempoMark(0.0, bpm)),   // 速度表：第一筆在 0 秒，其後為曲中變速
+    val timeSignature: TimeSignature = TimeSignature(4, 4),      // 第一小節拍號
+)
+data class TimeSignature(val beats: Int, val beatType: Int) { val beatQuarters: Double }  // toString() = "3/4"
+data class Beat(val time: Double, val measure: Int, val beat: Int) { val isDownbeat: Boolean }
+data class TempoMark(val time: Double, val bpm: Double)
 object ScoreLoader {
     /** bytes 可為純 XML 或 .mxl(ZIP，magic bytes "PK")，需自動解壓並取出主譜 XML。 */
     fun load(bytes: ByteArray, bpmOverride: Double? = null): LoadedScore
@@ -48,12 +56,14 @@ object ScoreLoader {
 ```
 解析規則（只取第一個 part，單聲部）：
 - ZIP 偵測：`bytes[0]=='P' && bytes[1]=='K'` → 解 zip，讀 `META-INF/container.xml` 的 rootfile full-path，否則取第一個非 META-INF 的 `.xml/.musicxml`。
-- tempo：`bpmOverride` > 樂譜中第一個 `<sound tempo="..">` 或 `<metronome>`(beat-unit+per-minute) > 預設 120。
+- tempo：`bpmOverride` > 樂譜中第一個 `<sound tempo="..">` 或 `<metronome>`(beat-unit(+beat-unit-dot)+per-minute) > 預設 120，即開頭速度 `bpm`。
+- 曲中變速（v1.0.10）：第一個 part 內位置 > 0 的 `<sound tempo>` 或 `<direction>` 的 `<metronome>` 自該位置起改變速度（`bpmOverride` 時忽略），寫入 `tempos`。
+- 拍號：`<attributes><time>`（beats 可為 "3+2"），每拍長 `4/beat-type` quarter；每小節依實際長度產生 `beats`（小節第一拍為 downbeat）；第一小節短於拍號時視為弱起，拍號靠右對齊。
 - 逐 measure 累積時間。每個 measure 內維護 `divisions`（來自 `<attributes><divisions>`）。
 - `<note>`：`<duration>` / divisions = quarterLength；含 `<rest>` → midi=REST，name="rest"；含 `<pitch>`(step,octave,alter) → 轉 MIDI：`midi = (octave+1)*12 + stepSemitone[step] + alter`，stepSemitone: C0 D2 E4 F5 G7 A9 B11；name 用 `"$step$octave"`（有 alter 時加 #/b）。
 - `<note>` 含 `<chord/>`：和弦音與「前一個音」同起點，取最高音（不前進時間游標）。
 - `<note>` 前進時間游標；`<backup><duration>` 後退；`<forward><duration>` 前進。
-- start = 目前時間游標(quarter) × (60/bpm)；end = start + quarterLength×(60/bpm)。
+- start / end 先以 quarter 計，最後經速度表換成秒（單一速度時 = quarter × 60/bpm，與 Python 相同）。
 - 與 Python 對齊：rests 也要保留在 timeline。
 
 ### `core/PitchDetector.kt`
@@ -70,6 +80,20 @@ class PitchDetector(
 }
 ```
 做法（McLeod / NSDF）：RMS < 0.01 回 null；從 **lag 0** 算 NSDF 到 maxLag，跳過 lag-0 主瓣後收集 key maxima（只有 `[minLag, maxLag]` 內的 lag 有資格），取第一個 ≥ 0.8 × 最大峰者，拋物線內插求精確 lag 與 clarity；clarity < clarityThreshold 或 hz 超出 [fmin,fmax] 回 null。（從 minLag 開始掃描會把 830 Hz 以上的音判成低八度，見 arc42 §8.2。）
+
+
+### `core/RhythmChecker.kt`（Android 新增，Python 無對應）
+```kotlin
+enum class RhythmIssue { RUSHING, DRAGGING }
+data class RhythmEvent(val noteIdx: Int, val issue: RhythmIssue, val deviationSec: Double, val time: Double)
+class RhythmChecker(notes: List<ScoreNote>) {          // notes = 已依練習速度縮放的 timeline
+    val events: List<RhythmEvent>; fun count(issue: RhythmIssue): Int
+    fun observe(now: Double, currentIdx: Int, detectedMidi: Int?): RhythmEvent?   // 每 tick 一次
+    companion object { const val ONSET_TICKS = 3; const val MIN_TOLERANCE_SEC = 0.15; const val RELATIVE_TOLERANCE = 0.3 }
+}
+```
+- onset ＝ 跟譜器目前音的音高連續出現 ≥ `ONSET_TICKS` 的起點；比較兩個 onset 的間隔與譜上間隔。
+- 誤差 > max(0.15 s, 0.3 × 譜上間隔)：提早 → `RUSHING`，延後 → `DRAGGING`；仍拉著前一音（或無聲）而下一音已逾時 → 立即 `DRAGGING`。錯音不算節奏錯。每顆音最多報一次；同音反覆需中間有無聲（換弓）才算新 onset。
 
 ### `core/ScoreFollower.kt`
 **逐行移植** `score_follower.py`。常數：`ADVANCE_THRESHOLD_TICKS=5`, `LOOKAHEAD=3`, `TIMEOUT_FACTOR=2.5`。
@@ -225,12 +249,17 @@ object ReportHtml {
       val bpm: Double; val practiceBpm: Double; val tempoFactor: Double; val waitMode: Boolean
       fun changePracticeBpm(value: Double); fun adjustPracticeBpm(delta: Int); fun resetPracticeBpm()
       fun changeWaitMode(on: Boolean); fun toggleMetronome()
+      // 節拍跟著樂譜：timeSignature、measureNo / beatNo（第幾小節第幾拍）、currentBpm（目前音所在的速度 × tempoFactor）
+      val timeSignature: TimeSignature; val measureNo: Int; val beatNo: Int; val currentBpm: Double
+      // 節奏警示（等正確模式不判定）：rhythmWarning 在出錯當下出現，RHYTHM_WARNING_HOLD_SEC 後自動消失
+      val rhythmWarning: RhythmIssue?; val rushCount: Int; val dragCount: Int
       fun onMicPermissionChanged(granted: Boolean); fun onForegroundChanged(foreground: Boolean)
       fun importScore(displayName: String, bytes: ByteArray); fun importFromUrl(url: String); fun clearImportStatus()
       fun buildReportFile(): File?
       internal fun stepForTest()
       companion object { const val TICK_MS = 50L; const val CALIB_REQUIRED_TICKS = 30
-                         const val MIN_PRACTICE_BPM = 30.0; const val MAX_PRACTICE_BPM = 240.0; fun factory(app, source) }
+                         const val MIN_PRACTICE_BPM = 30.0; const val MAX_PRACTICE_BPM = 240.0
+                         const val RHYTHM_WARNING_HOLD_SEC = 1.5; fun factory(app, source) }
   }
   ```
   - 麥克風：`syncMic()` 在每次狀態改變時重算「有權限 ∧ 前景 ∧ 畫面為 TUNING/PRACTICE」決定 start/stop；背景中的練習會重設，回前景重新倒數。

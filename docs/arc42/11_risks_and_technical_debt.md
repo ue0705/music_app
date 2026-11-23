@@ -37,6 +37,7 @@ graph TD
 | **匯入的樂譜可能不受支援** | 同一 part 內多聲部（`<backup>`）會讓 timeline 亂序；連結線拆成兩顆音；裝飾音變成 0 長度的音；反覆記號不展開 | 已列於 [8.1](08_crosscutting_concepts.md#81-樂譜解析-musicxml)；內建的 G 大調音階、小星星，以及專案外附的 Canon 大提琴分譜都是單一 part、沒有 `<backup>`（Canon 有 1 處連結線） |
 | **從網址匯入的輸入未設上限** | 下載沒有大小上限；XML 未開 secure-processing，惡意檔案可能耗盡記憶體 | 僅使用者主動輸入網址時發生；Android 9+ 只允許 HTTPS。必要時加入大小上限與 `FEATURE_SECURE_PROCESSING` |
 | **吵雜房間偵測不穩** | 環境噪音、其他樂器、共鳴會讓 [NSDF](12_glossary.md#nsdf) clarity 下降，產生漏抓或誤抓 | clarity 門檻 0.9 + cello 音域 [fmin,fmax]=[60,1100] 過濾；安靜環境效果最佳。對應 [延遲品質](10_quality_requirements.md#1031-延遲-latency) |
+| **節奏判定未經實機驗證**（v1.0.10） | 以音高 onset 判定；麥克風延遲、殘響或偵測抖動可能造成誤報，同音反覆不換弓時分不出 onset | 容許誤差偏寬（≥ 0.15 s 或 30%），每音最多報一次；錯音不算節奏錯；`RhythmCheckerTest`、`RhythmWarningTest` 以腳本音高驗證。需實機調整門檻 |
 | **無 OMR** | 只支援已有 MusicXML 的曲目，不能拍譜照辨識 | 設計外範圍；提供 assets 內建曲與外部 `.musicxml/.mxl` 載入 |
 
 ### Android/環境風險（本次移植新增）

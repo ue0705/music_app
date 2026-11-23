@@ -12,7 +12,32 @@ import javax.xml.parsers.DocumentBuilderFactory
  * (rests included, matching the Python reference) and the effective [bpm] that is
  * baked into each note's start/end times.
  */
-data class LoadedScore(val notes: List<ScoreNote>, val bpm: Double)
+data class LoadedScore(
+    val notes: List<ScoreNote>,
+    /** Tempo at the start of the score (quarter-note BPM). */
+    val bpm: Double,
+    /** Metronome grid derived from the score's time signatures (seconds, at the score tempo). */
+    val beats: List<Beat> = emptyList(),
+    /** Tempo map: the first entry is at time 0; later entries are tempo changes in the score. */
+    val tempos: List<TempoMark> = listOf(TempoMark(0.0, bpm)),
+    /** Time signature of the first measure (4/4 when the score has none). */
+    val timeSignature: TimeSignature = TimeSignature(4, 4),
+)
+
+/** A time signature such as 3/4: [beats] per measure, each one 1/[beatType] note long. */
+data class TimeSignature(val beats: Int, val beatType: Int) {
+    /** Length of one beat in quarter notes (4/4 → 1.0, 6/8 → 0.5, 2/2 → 2.0). */
+    val beatQuarters: Double get() = 4.0 / beatType
+    override fun toString(): String = "$beats/$beatType"
+}
+
+/** One metronome beat at [time] seconds: beat [beat] (1-based) of measure [measure]. */
+data class Beat(val time: Double, val measure: Int, val beat: Int) {
+    val isDownbeat: Boolean get() = beat == 1
+}
+
+/** From [time] seconds on, the score's tempo is [bpm] quarter notes per minute. */
+data class TempoMark(val time: Double, val bpm: Double)
 
 /**
  * Port of `score_loader.py`.
@@ -63,23 +88,38 @@ object ScoreLoader {
         val doc = parseXml(xmlBytes)
 
         val bpm = bpmOverride ?: detectTempo(doc) ?: DEFAULT_BPM
-        val secPerQuarter = 60.0 / bpm
 
         val part = firstElement(doc.documentElement, "part")
             ?: return LoadedScore(emptyList(), bpm)
 
+        // Notes are collected with start/end in *quarter notes* and converted to
+        // seconds through the tempo map at the end, so mid-score tempo changes land
+        // where the score puts them.
         val notes = mutableListOf<ScoreNote>()
+        val tempoEvents = mutableListOf<Pair<Double, Double>>() // (quarter position, bpm)
+        val beatsQ = mutableListOf<Triple<Double, Int, Int>>()  // (quarter position, measure, beat)
+        var firstTimeSig: TimeSignature? = null
+        var timeSig = TimeSignature(4, 4)
         var divisions = 1.0
         var cursorQuarters = 0.0       // current playback position, in quarter notes
         var lastOnsetQuarters = 0.0    // onset of the previous note (for <chord/>)
 
-        for (measure in childElements(part, "measure")) {
+        for ((mIndex, measure) in childElements(part, "measure").withIndex()) {
+            val measureNo = measure.getAttribute("number").trim().toIntOrNull() ?: (mIndex + 1)
+            val measureStart = cursorQuarters
+            var measureEnd = cursorQuarters
             for (child in childElements(measure)) {
                 when (child.tagName) {
                     "attributes" -> {
                         firstElement(child, "divisions")?.textContent?.trim()
                             ?.toDoubleOrNull()?.let { if (it > 0) divisions = it }
+                        firstElement(child, "time")?.let { parseTime(it) }?.let { timeSig = it }
                     }
+
+                    "direction" -> directionTempo(child)?.let { tempoEvents += cursorQuarters to it }
+
+                    "sound" -> child.getAttribute("tempo").trim().toDoubleOrNull()
+                        ?.takeIf { it > 0 }?.let { tempoEvents += cursorQuarters to it }
 
                     "backup" -> {
                         val dur = durationQuarters(child, divisions)
@@ -95,8 +135,8 @@ object ScoreLoader {
                         val isChord = firstElement(child, "chord") != null
                         val dur = durationQuarters(child, divisions)
                         val onset = if (isChord) lastOnsetQuarters else cursorQuarters
-                        val start = onset * secPerQuarter
-                        val end = start + dur * secPerQuarter
+                        val start = onset
+                        val end = start + dur
 
                         val rest = firstElement(child, "rest") != null
                         val pitchEl = firstElement(child, "pitch")
@@ -126,10 +166,99 @@ object ScoreLoader {
                         }
                     }
                 }
+                if (cursorQuarters > measureEnd) measureEnd = cursorQuarters
             }
+            if (firstTimeSig == null) firstTimeSig = timeSig
+            beatsQ += measureBeats(measureStart, measureEnd - measureStart, timeSig, measureNo, pickup = mIndex == 0)
         }
 
-        return LoadedScore(notes, bpm)
+        // Tempo map: the initial tempo from time 0, then every later change in the
+        // part. An override pins the whole score to one tempo.
+        val segments = mutableListOf(0.0 to bpm)
+        if (bpmOverride == null) {
+            for ((q, t) in tempoEvents.sortedBy { it.first }) {
+                if (q <= EPS) continue // the opening tempo is already `bpm`
+                if (kotlin.math.abs(segments.last().first - q) <= EPS) segments[segments.lastIndex] = q to t
+                else if (segments.last().second != t) segments += q to t
+            }
+        }
+        fun seconds(q: Double): Double {
+            var sec = 0.0
+            for (i in segments.indices) {
+                val (segStart, segBpm) = segments[i]
+                val segEnd = segments.getOrNull(i + 1)?.first
+                if (segEnd == null || q <= segEnd) return sec + (q - segStart) * 60.0 / segBpm
+                sec += (segEnd - segStart) * 60.0 / segBpm
+            }
+            return sec
+        }
+
+        return LoadedScore(
+            notes = notes.map { it.copy(start = seconds(it.start), end = seconds(it.end)) },
+            bpm = bpm,
+            beats = beatsQ.map { (q, m, b) -> Beat(seconds(q), m, b) },
+            tempos = segments.map { (q, t) -> TempoMark(seconds(q), t) },
+            timeSignature = firstTimeSig ?: TimeSignature(4, 4),
+        )
+    }
+
+    private const val EPS = 1e-6
+
+    /**
+     * Beats of one measure (quarter positions). A full measure gets beats 1..n from
+     * its start. A short first measure is a pickup (anacrusis): its beats are
+     * right-aligned so they carry the last beat numbers of the bar.
+     */
+    private fun measureBeats(
+        start: Double, length: Double, ts: TimeSignature, measureNo: Int, pickup: Boolean,
+    ): List<Triple<Double, Int, Int>> {
+        val bq = ts.beatQuarters
+        val nominal = ts.beats * bq
+        val len = if (length <= EPS) nominal else length
+        val out = ArrayList<Triple<Double, Int, Int>>()
+        if (pickup && len < nominal - EPS) {
+            val count = kotlin.math.ceil(len / bq - EPS).toInt()
+            for (j in 0 until count) {
+                val q = start + len - (count - j) * bq
+                if (q >= start - EPS) out += Triple(q, measureNo, ts.beats - count + j + 1)
+            }
+        } else {
+            var k = 0
+            while (k * bq < len - EPS) {
+                out += Triple(start + k * bq, measureNo, (k % ts.beats) + 1)
+                k++
+            }
+        }
+        return out
+    }
+
+    /** `<time><beats>3</beats><beat-type>4</beat-type></time>`; "3+2" beats are summed. */
+    private fun parseTime(time: Element): TimeSignature? {
+        val beats = firstElement(time, "beats")?.textContent?.trim()
+            ?.split('+')?.mapNotNull { it.trim().toIntOrNull() }?.sum() ?: return null
+        val type = firstElement(time, "beat-type")?.textContent?.trim()?.toIntOrNull() ?: return null
+        return if (beats > 0 && type > 0) TimeSignature(beats, type) else null
+    }
+
+    /** Tempo set by a `<direction>`: its `<sound tempo>`, else its `<metronome>`. */
+    private fun directionTempo(direction: Element): Double? {
+        firstElement(direction, "sound")?.getAttribute("tempo")?.trim()?.toDoubleOrNull()
+            ?.takeIf { it > 0 }?.let { return it }
+        for (dt in childElements(direction, "direction-type")) {
+            val m = firstElement(dt, "metronome") ?: continue
+            return metronomeBpm(m)
+        }
+        return null
+    }
+
+    /** `<metronome>` (beat-unit, optional dot, per-minute) in quarter-note BPM. */
+    private fun metronomeBpm(m: Element): Double? {
+        val perMinute = firstElement(m, "per-minute")?.textContent?.trim()?.toDoubleOrNull()
+            ?.takeIf { it > 0 } ?: return null
+        val beatUnit = firstElement(m, "beat-unit")?.textContent?.trim()
+        var unitQuarters = BEAT_UNIT_QUARTERS[beatUnit] ?: 1.0
+        if (firstElement(m, "beat-unit-dot") != null) unitQuarters *= 1.5
+        return perMinute * unitQuarters
     }
 
     // --- ZIP handling --------------------------------------------------------
@@ -188,14 +317,8 @@ object ScoreLoader {
         // <metronome><beat-unit>..</beat-unit><per-minute>..</per-minute></metronome>
         val metros = doc.getElementsByTagName("metronome")
         for (i in 0 until metros.length) {
-            val m = metros.item(i) as Element
-            val perMinute = firstElement(m, "per-minute")?.textContent?.trim()?.toDoubleOrNull()
-            if (perMinute != null && perMinute > 0) {
-                val beatUnit = firstElement(m, "beat-unit")?.textContent?.trim()
-                val unitQuarters = BEAT_UNIT_QUARTERS[beatUnit] ?: 1.0
-                // per-minute counts beat-units; convert to quarter-note BPM.
-                return perMinute * unitQuarters
-            }
+            // per-minute counts beat-units; convert to quarter-note BPM.
+            metronomeBpm(metros.item(i) as Element)?.let { return it }
         }
         return null
     }
