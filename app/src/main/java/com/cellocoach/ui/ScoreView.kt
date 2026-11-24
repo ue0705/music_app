@@ -29,7 +29,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.cellocoach.core.PitchStatus
+import com.cellocoach.core.Barline
+import com.cellocoach.core.MeasureStart
+import com.cellocoach.core.ScoreLayout
 import com.cellocoach.core.ScoreNote
+import com.cellocoach.core.TempoMark
 import kotlin.math.roundToInt
 
 /**
@@ -56,6 +60,10 @@ fun ScoreView(
     status: PitchStatus?,
     bpm: Double,
     modifier: Modifier = Modifier,
+    /** The score's `<measure>` starts — one bar line per measure, like the imported XML. */
+    measures: List<MeasureStart> = emptyList(),
+    /** Tempo map, so note values stay right after a mid-score tempo change. */
+    tempos: List<TempoMark> = emptyList(),
 ) {
     val density = LocalDensity.current
     val scroll = rememberScrollState()
@@ -67,6 +75,7 @@ fun ScoreView(
     val clefGlyph = if (refMidi >= TREBLE_BOTTOM) "𝄞" else "𝄢" // 𝄞 / 𝄢
 
     val noteSpacingPx = with(density) { 52.dp.toPx() }
+    val barlines = remember(notes, measures) { ScoreLayout.barlines(notes, measures) }
 
     Box(
         modifier = modifier
@@ -104,7 +113,8 @@ fun ScoreView(
             // Scrolling layer: the notes themselves.
             Row(modifier = Modifier.fillMaxSize().horizontalScroll(scroll)) {
                 Canvas(modifier = Modifier.width(contentDp).fillMaxHeight()) {
-                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx, refMidi, bpm)
+                    drawBarlines(notes.size, barlines, ScoreLayout.firstMeasureNumber(measures), leadPx, noteSpacingPx)
+                    drawNotes(notes, currentNoteIdx, status, leadPx, noteSpacingPx, refMidi, bpm, tempos)
                 }
             }
         }
@@ -159,13 +169,13 @@ private fun DrawScope.drawNotes(
     noteSpacing: Float,
     refMidi: Int,
     bpm: Double,
+    tempos: List<TempoMark>,
 ) {
     if (notes.isEmpty()) return
     val ls = lineSpacing()
     val top = staffTop()
     val bottom = top + 4f * ls
     val refStep = absoluteDiatonicStep(refMidi)
-    val secPerQuarter = 60.0 / bpm.coerceAtLeast(1.0)
 
     fun xForIdx(i: Int) = leadPx + i * noteSpacing + noteSpacing / 2f
     // Bottom staff line = refMidi; each diatonic step is half a line spacing up.
@@ -180,12 +190,15 @@ private fun DrawScope.drawNotes(
     }
 
     val n = notes.size
-    val shapes = Array(n) { classifyDuration((notes[it].end - notes[it].start) / secPerQuarter) }
+    // Quarter positions through the tempo map (a tempo change must not turn
+    // quarters into "eighths" on the staff).
+    fun q(t: Double) = ScoreLayout.quartersAt(t, tempos, bpm)
+    val shapes = Array(n) { classifyDuration(q(notes[it].end) - q(notes[it].start)) }
     val stemLen = ls * 3.2f
 
     // --- beam grouping: maximal runs of consecutive pitched notes that carry a
     // flag (eighth or shorter) and fall within the same quarter-note beat. ---
-    fun beat(i: Int) = kotlin.math.floor(notes[i].start / secPerQuarter + 1e-6).toInt()
+    fun beat(i: Int) = kotlin.math.floor(q(notes[i].start) + 1e-6).toInt()
     fun beamable(i: Int) = !notes[i].isRest && shapes[i].flags >= 1
     val groupOf = IntArray(n) { -1 }
     val groups = ArrayList<IntRange>()
@@ -245,6 +258,38 @@ private fun DrawScope.drawNotes(
             }
         }
     }
+}
+
+/**
+ * Bar lines from the score's measures: a thin line through the staff just before
+ * the first note of each bar, the bar number above it, and a final double bar
+ * (thin + thick) after the last note.
+ */
+private fun DrawScope.drawBarlines(
+    noteCount: Int, barlines: List<Barline>, firstMeasure: Int?, leadPx: Float, noteSpacing: Float,
+) {
+    if (noteCount == 0) return
+    val ls = lineSpacing()
+    val top = staffTop()
+    val bottom = top + 4f * ls
+    val thin = ls * 0.12f
+    val numPaint = android.graphics.Paint().apply {
+        color = Faint.toArgb(); textSize = ls * 1.2f; isAntiAlias = true
+        textAlign = android.graphics.Paint.Align.LEFT
+    }
+    fun label(x: Float, n: Int) =
+        drawContext.canvas.nativeCanvas.drawText(n.toString(), x + ls * 0.2f, top - ls * 0.6f, numPaint)
+
+    firstMeasure?.let { label(leadPx, it) }
+    for (b in barlines) {
+        val x = leadPx + b.noteIdx * noteSpacing
+        drawLine(Ink, Offset(x, top), Offset(x, bottom), strokeWidth = thin)
+        label(x, b.measure)
+    }
+    // Final bar line: thin + thick.
+    val endX = leadPx + noteCount * noteSpacing
+    drawLine(Ink, Offset(endX - ls * 0.6f, top), Offset(endX - ls * 0.6f, bottom), strokeWidth = thin)
+    drawLine(Ink, Offset(endX, top), Offset(endX, bottom), strokeWidth = ls * 0.4f)
 }
 
 private fun stemX(cx: Float, ls: Float) = cx + (ls * 0.62f) * 0.92f

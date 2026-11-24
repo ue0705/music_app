@@ -24,6 +24,7 @@ import com.cellocoach.core.Beat
 import com.cellocoach.core.RhythmChecker
 import com.cellocoach.core.RhythmIssue
 import com.cellocoach.core.TempoMark
+import com.cellocoach.core.MeasureStart
 import com.cellocoach.core.TimeSignature
 import com.cellocoach.core.nominalHzForString
 import com.cellocoach.core.pitchStatus
@@ -146,6 +147,11 @@ class PracticeViewModel(
     /** The score's metronome grid and tempo map (seconds at the score tempo). */
     private var beats: List<Beat> = emptyList()
     private var tempos: List<TempoMark> = emptyList()
+    private var measures: List<MeasureStart> = emptyList()
+
+    /** Measure starts and tempo map (score seconds) for [ScoreView]'s bar lines and note values. */
+    val scoreMeasures: List<MeasureStart> get() = measures
+    val scoreTempos: List<TempoMark> get() = tempos
 
     /** Time signature of the score's first measure (drives the count-in and beat display). */
     var timeSignature by mutableStateOf(TimeSignature(4, 4))
@@ -678,6 +684,7 @@ class PracticeViewModel(
         bpm = loaded.bpm
         beats = loaded.beats
         tempos = loaded.tempos
+        measures = loaded.measures
         timeSignature = loaded.timeSignature
         // A new score starts at its own tempo (still within the selectable range).
         practiceBpm = loaded.bpm.coerceIn(MIN_PRACTICE_BPM, MAX_PRACTICE_BPM).roundToInt().toDouble()

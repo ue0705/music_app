@@ -45,7 +45,9 @@ data class LoadedScore(
     val beats: List<Beat> = emptyList(),                         // 依拍號產生的拍點（秒，樂譜速度）
     val tempos: List<TempoMark> = listOf(TempoMark(0.0, bpm)),   // 速度表：第一筆在 0 秒，其後為曲中變速
     val timeSignature: TimeSignature = TimeSignature(4, 4),      // 第一小節拍號
+    val measures: List<MeasureStart> = emptyList(),              // 每個 <measure> 的起點（v1.0.11，畫小節線用）
 )
+data class MeasureStart(val time: Double, val number: Int)       // number = number 屬性，非整數時用第幾個 measure
 data class TimeSignature(val beats: Int, val beatType: Int) { val beatQuarters: Double }  // toString() = "3/4"
 data class Beat(val time: Double, val measure: Int, val beat: Int) { val isDownbeat: Boolean }
 data class TempoMark(val time: Double, val bpm: Double)
@@ -81,6 +83,18 @@ class PitchDetector(
 ```
 做法（McLeod / NSDF）：RMS < 0.01 回 null；從 **lag 0** 算 NSDF 到 maxLag，跳過 lag-0 主瓣後收集 key maxima（只有 `[minLag, maxLag]` 內的 lag 有資格），取第一個 ≥ 0.8 × 最大峰者，拋物線內插求精確 lag 與 clarity；clarity < clarityThreshold 或 hz 超出 [fmin,fmax] 回 null。（從 minLag 開始掃描會把 830 Hz 以上的音判成低八度，見 arc42 §8.2。）
 
+
+
+### `core/ScoreLayout.kt`（Android 新增，v1.0.11）
+```kotlin
+data class Barline(val noteIdx: Int, val measure: Int)   // 畫在第 noteIdx 個音之前，measure = 從這裡開始的小節號
+object ScoreLayout {
+    fun barlines(notes: List<ScoreNote>, measures: List<MeasureStart>): List<Barline>  // 第一小節不畫；沒有音的小節略過
+    fun firstMeasureNumber(measures: List<MeasureStart>): Int?
+    fun quartersAt(seconds: Double, tempos: List<TempoMark>, bpm: Double): Double     // 依速度表把秒換成 quarter
+}
+```
+`ScoreView(notes, currentNoteIdx, status, bpm, modifier, measures = emptyList(), tempos = emptyList())`；`PracticeViewModel.scoreMeasures` / `scoreTempos` 提供資料。
 
 ### `core/RhythmChecker.kt`（Android 新增，Python 無對應）
 ```kotlin
@@ -230,7 +244,7 @@ object ReportHtml {
 - 畫面（單一 Activity + Compose 狀態切換，無需 Navigation 套件）：
   1. **Home**：選曲（assets 內 `g_major_scale.musicxml` 等）、顯示已存校正狀態、「開始練習」。
   2. **Tuning**：依序 C→G→D→A，顯示目前目標弦、即時 cents、進度條（30 tick）；可「略過」。完成存檔。
-  3. **Practice**：原生 Compose 五線譜 `ScoreView`（畫五線譜、音符、隨演奏移動的游標、目前音 good/close/off/wrong 上色）、即時面板（應拉 vs 你拉、cents、status 顏色）、節拍器 4 拍倒數、開始前倒數。
+  3. **Practice**：原生 Compose 五線譜 `ScoreView`（畫五線譜、音符、照 `<measure>` 畫的小節線與小節號碼、終止線、隨演奏移動的游標、目前音 good/close/off/wrong 上色）、即時面板（應拉 vs 你拉、cents、status 顏色）、節拍器 4 拍倒數、開始前倒數。
   4. **Report**：總分、對音 X/Y、平均 cents、每顆音明細清單、診斷。
 - `PracticeViewModel`：持有 ScoreFollower + Scorer + Tuning，訂閱 PitchSource，50ms tick 邏輯比照 `main.py` 的 `_practice_tick_loop` 與 `_calibration_tick_loop`。狀態以 Compose `mutableStateOf` 暴露。
   ```kotlin

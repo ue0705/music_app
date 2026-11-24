@@ -22,7 +22,12 @@ data class LoadedScore(
     val tempos: List<TempoMark> = listOf(TempoMark(0.0, bpm)),
     /** Time signature of the first measure (4/4 when the score has none). */
     val timeSignature: TimeSignature = TimeSignature(4, 4),
+    /** Start of every `<measure>` in the first part, in score order (for bar lines). */
+    val measures: List<MeasureStart> = emptyList(),
 )
+
+/** A `<measure>` begins at [time] seconds; [number] is its `number` attribute (or its 1-based position). */
+data class MeasureStart(val time: Double, val number: Int)
 
 /** A time signature such as 3/4: [beats] per measure, each one 1/[beatType] note long. */
 data class TimeSignature(val beats: Int, val beatType: Int) {
@@ -98,6 +103,7 @@ object ScoreLoader {
         val notes = mutableListOf<ScoreNote>()
         val tempoEvents = mutableListOf<Pair<Double, Double>>() // (quarter position, bpm)
         val beatsQ = mutableListOf<Triple<Double, Int, Int>>()  // (quarter position, measure, beat)
+        val measuresQ = mutableListOf<Pair<Double, Int>>()      // (quarter position, measure number)
         var firstTimeSig: TimeSignature? = null
         var timeSig = TimeSignature(4, 4)
         var divisions = 1.0
@@ -107,6 +113,7 @@ object ScoreLoader {
         for ((mIndex, measure) in childElements(part, "measure").withIndex()) {
             val measureNo = measure.getAttribute("number").trim().toIntOrNull() ?: (mIndex + 1)
             val measureStart = cursorQuarters
+            measuresQ += measureStart to measureNo
             var measureEnd = cursorQuarters
             for (child in childElements(measure)) {
                 when (child.tagName) {
@@ -199,6 +206,7 @@ object ScoreLoader {
             beats = beatsQ.map { (q, m, b) -> Beat(seconds(q), m, b) },
             tempos = segments.map { (q, t) -> TempoMark(seconds(q), t) },
             timeSignature = firstTimeSig ?: TimeSignature(4, 4),
+            measures = measuresQ.map { (q, m) -> MeasureStart(seconds(q), m) },
         )
     }
 

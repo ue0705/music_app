@@ -12,6 +12,7 @@
 - **離線解析**：關閉外部 DTD 載入，`EntityResolver` 一律回空內容，MusicXML 的 DTD 宣告不會觸發網路存取。
 - **tempo 優先序**：`bpmOverride` > 第一個 `<sound tempo>`／`<metronome>`（beat-unit + 附點 + per-minute） > 預設 120，即開頭速度 `bpm`。
 - **曲中變速**（v1.0.10）：第一個 part 內位置 > 0 的 `<sound tempo>`／`<direction>` 的 `<metronome>` 建成速度表 `tempos`；音符先以 quarter 計，最後依速度表分段換成秒（單一速度時與 Python 完全相同）。
+- **小節起點**（v1.0.11）：每個 `<measure>` 的起點記成 `MeasureStart(time, number)`，練習畫面的小節線照它畫。
 - **拍號與拍點**：`<attributes><time>` 決定每小節拍數與拍長（`4/beat-type` quarter，6/8 → 6 個八分拍）；每小節依實際長度產生 `Beat(time, measure, beat)`，第一小節不足一小節時視為弱起、拍號靠右對齊。沒有 `<time>` 時當作 4/4。
 - **時間累積**：逐 measure，依 `<attributes><divisions>` 把 `<duration>/divisions` 換成 quarterLength。`<note>` 前進游標、`<backup>` 後退、`<forward>` 前進。
 - **MIDI 換算**：`midi = (octave+1)*12 + stepSemitone[step] + alter`，`stepSemitone = C0 D2 E4 F5 G7 A9 B11`；name 用 `"$step$octave"`（有 alter 加 #/b）。

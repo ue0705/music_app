@@ -186,7 +186,8 @@ graph TD
 - **`ScoreView`**（原生 Compose Canvas，[ADR-001](09_architecture_decisions.md#adr-001-原生-compose-canvas-樂譜渲染-而非-webview--osmd)）：
   - 「提詞機」版面：五線譜與譜號固定，音符在下方水平捲動，**目前的音固定在畫面中央**；
   - 依樂譜音域自動選譜號（音高中位數 ≥ C4 用高音譜號，否則低音譜號）；
-  - 依時值畫全／二分／四分／八分／十六分音符（含附點），同一拍內的八分、十六分音符以符槓相連；
+  - 依時值畫全／二分／四分／八分／十六分音符（含附點），同一拍內的八分、十六分音符以符槓相連；時值依速度表換算成 quarter，曲中變速後也不會畫錯；
+  - **小節線**（v1.0.11）：照 MusicXML 的每個 `<measure>`，在每小節第一個音前畫小節線並標小節號碼，最後一音後畫終止線（細 + 粗）。位置由純 Kotlin 的 `core/ScoreLayout.barlines` 計算（音符等距排列，所以以音符索引定位）；
   - 每顆音下方標音名；目前音與音名依即時 status 上色；米色紙張底色在深色模式也清楚。
 - **測試掛勾**：可測元件加 `Modifier.testTag(...)`，tag 集中於 `ui/TestTags.kt`，並開啟 `testTagsAsResourceId`，讓 `uiautomator` 與 `scripts/phone.sh` 也能用同一組 id。
 

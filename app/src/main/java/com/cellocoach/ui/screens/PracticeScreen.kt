@@ -71,6 +71,8 @@ fun PracticeScreen(vm: PracticeViewModel, modifier: Modifier = Modifier) {
                 currentNoteIdx = vm.currentNoteIdx,
                 status = vm.status,
                 bpm = vm.bpm,
+                measures = vm.scoreMeasures,
+                tempos = vm.scoreTempos,
             )
 
             RhythmBanner(vm)
